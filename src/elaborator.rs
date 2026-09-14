@@ -59,9 +59,9 @@ impl<'a> Checker<'a> {
                 let mut new_env = env.to_vec();
                 new_env.push(var.clone());
                 
-                let expected_body_ty = cod_closure.instantiate(self.ast, var);
+                let expected_body_ty = cod_closure.clone().instantiate(self.ast, var);
                 let mut new_types = types.to_vec();
-                new_types.push(*dom);
+                new_types.push((*dom).clone());
                 
                 let mut body_elab = self.check(body, expected_body_ty, depth + 1, &new_env, &new_types)?;
                 
@@ -75,7 +75,7 @@ impl<'a> Checker<'a> {
                     body_elab.usages.truncate(depth);
                 }
                 
-                return Ok(Elaboration { ty: Value::Pi(decl_q, Box::new(Value::Universe), crate::eval::Closure { env: vec![], body }), usages: body_elab.usages });
+                return Ok(Elaboration { ty: Value::Pi(decl_q, dom, cod_closure), usages: body_elab.usages });
             } else {
                 return Err(Error::ExpectedFunction { expr, found: format!("{:?}", expected) });
             }

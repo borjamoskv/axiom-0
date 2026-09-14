@@ -144,16 +144,37 @@ impl<'a> Parser<'a> {
                         _ => {}
                     }
                 }
-                let param_tok = self.expect(TokenKind::Ident, "identifier")?;
-                let param_name = param_tok.text;
                 
-                self.expect(TokenKind::Arrow, "'->'")?;
-                self.env.push(param_name.to_string());
-                let body = self.parse_expression()?;
-                self.env.pop();
-                let end_span = self.tokens.get(self.cursor.saturating_sub(1)).map(|t| t.span).unwrap_or(start_span);
-                let span = AstSpan::new(start_span.start, end_span.end).unwrap();
-                Ok(self.ast.push_spanned_exact(Expr::Lambda { quantity, body }, span)?)
+                let is_pi = if let Some(tok) = self.peek() { tok.kind == TokenKind::LParen } else { false };
+                
+                if is_pi {
+                    self.advance(); // consume LParen
+                    let param_tok = self.expect(TokenKind::Ident, "identifier")?;
+                    let param_name = param_tok.text;
+                    self.expect(TokenKind::Colon, "':'")?;
+                    let domain = self.parse_expression()?;
+                    self.expect(TokenKind::RParen, "')'")?;
+                    
+                    self.expect(TokenKind::Arrow, "'->'")?;
+                    self.env.push(param_name.to_string());
+                    let codomain = self.parse_expression()?;
+                    self.env.pop();
+                    
+                    let end_span = self.tokens.get(self.cursor.saturating_sub(1)).map(|t| t.span).unwrap_or(start_span);
+                    let span = AstSpan::new(start_span.start, end_span.end).unwrap();
+                    Ok(self.ast.push_spanned_exact(Expr::Pi { quantity, domain, codomain }, span)?)
+                } else {
+                    let param_tok = self.expect(TokenKind::Ident, "identifier")?;
+                    let param_name = param_tok.text;
+                    
+                    self.expect(TokenKind::Arrow, "'->'")?;
+                    self.env.push(param_name.to_string());
+                    let body = self.parse_expression()?;
+                    self.env.pop();
+                    let end_span = self.tokens.get(self.cursor.saturating_sub(1)).map(|t| t.span).unwrap_or(start_span);
+                    let span = AstSpan::new(start_span.start, end_span.end).unwrap();
+                    Ok(self.ast.push_spanned_exact(Expr::Lambda { quantity, body }, span)?)
+                }
             }
             TokenKind::Ident => {
                 let name = tok.text;
