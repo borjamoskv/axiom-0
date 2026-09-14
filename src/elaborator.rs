@@ -105,23 +105,34 @@ impl<'a> Checker<'a> {
                     Err(Error::UnboundVariable { expr, level })
                 }
             }
-            Expr::Universe | Expr::UnitType => Ok(Elaboration { ty: Value::Universe, usages: vec![] }),
+            Expr::Universe(level) => Ok(Elaboration { ty: Value::Universe(level + 1), usages: vec![] }),
+            Expr::UnitType => Ok(Elaboration { ty: Value::Universe(0), usages: vec![] }),
             Expr::Unit => Ok(Elaboration { ty: Value::UnitType, usages: vec![] }),
             Expr::Pi { quantity: _, domain, codomain } => {
-                // A type annotation uses variables at quantity ZERO because it is erased at runtime.
-                // We check them, but we multiply their usage by ZERO (or just discard).
-                self.check(domain, Value::Universe, depth, env, types)?;
+                let dom_elab = self.synth(domain, depth, env, types)?;
+                let u_dom = match dom_elab.ty {
+                    Value::Universe(u) => u,
+                    _ => return Err(Error::TypeMismatch { expr: domain, expected: "Universe".into(), found: format!("{:?}", dom_elab.ty) }),
+                };
                 let var = Value::Neutral(crate::eval::Neutral::Var(Level(depth)));
                 let mut new_env = env.to_vec();
                 new_env.push(var);
                 let dom_val = eval(self.ast, domain, env);
                 let mut new_types = types.to_vec();
                 new_types.push(dom_val);
-                self.check(codomain, Value::Universe, depth + 1, &new_env, &new_types)?;
-                Ok(Elaboration { ty: Value::Universe, usages: vec![] })
+                let cod_elab = self.synth(codomain, depth + 1, &new_env, &new_types)?;
+                let u_cod = match cod_elab.ty {
+                    Value::Universe(u) => u,
+                    _ => return Err(Error::TypeMismatch { expr: codomain, expected: "Universe".into(), found: format!("{:?}", cod_elab.ty) }),
+                };
+                Ok(Elaboration { ty: Value::Universe(u_dom.max(u_cod)), usages: vec![] })
             }
             Expr::Ann { term, ty } => {
-                self.check(ty, Value::Universe, depth, env, types)?;
+                let ty_elab = self.synth(ty, depth, env, types)?;
+                match ty_elab.ty {
+                    Value::Universe(_) => {},
+                    _ => return Err(Error::TypeMismatch { expr: ty, expected: "Universe".into(), found: format!("{:?}", ty_elab.ty) }),
+                };
                 let ty_val = eval(self.ast, ty, env);
                 let elab = self.check(term, ty_val.clone(), depth, env, types)?;
                 Ok(elab)

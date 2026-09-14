@@ -128,9 +128,18 @@ impl<'a> Parser<'a> {
         let tok = self.peek().ok_or(ParseError::UnexpectedEof)?;
         match tok.kind {
             TokenKind::Type => {
-                let span = convert_span(tok.span);
+                let start_span = tok.span;
                 self.advance();
-                Ok(self.ast.push_spanned_exact(Expr::Universe, span)?)
+                let mut level = 0;
+                if let Some(next_tok) = self.peek() {
+                    if let TokenKind::NatLiteral(n) = next_tok.kind {
+                        level = n as u32;
+                        self.advance();
+                    }
+                }
+                let end_span = self.tokens.get(self.cursor.saturating_sub(1)).map(|t| t.span).unwrap_or(start_span);
+                let span = AstSpan::new(start_span.start, end_span.end).unwrap();
+                Ok(self.ast.push_spanned_exact(Expr::Universe(level), span)?)
             }
             TokenKind::Fn => {
                 let start_span = tok.span;

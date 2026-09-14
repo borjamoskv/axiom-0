@@ -4,7 +4,7 @@ use crate::ast::{Ast, Expr, ExprId, Level, Quantity};
 pub enum Value {
     Unit,
     UnitType,
-    Universe,
+    Universe(u32),
     Pi(Quantity, Box<Value>, Closure),
     Lam(Quantity, Closure),
     Neutral(Neutral),
@@ -37,7 +37,7 @@ pub fn eval(ast: &Ast, expr: ExprId, env: &[Value]) -> Value {
         }
         Expr::Unit => Value::Unit,
         Expr::UnitType => Value::UnitType,
-        Expr::Universe => Value::Universe,
+        Expr::Universe(level) => Value::Universe(level),
         Expr::Pi { quantity, domain, codomain } => {
             Value::Pi(quantity, Box::new(eval(ast, domain, env)), Closure { env: env.to_vec(), body: codomain })
         }
@@ -59,7 +59,7 @@ pub fn equiv(ast: &Ast, a: &Value, b: &Value, depth: usize) -> bool {
     match (a, b) {
         (Value::Unit, Value::Unit) => true,
         (Value::UnitType, Value::UnitType) => true,
-        (Value::Universe, Value::Universe) => true,
+        (Value::Universe(l1), Value::Universe(l2)) => l1 == l2,
         (Value::Pi(q1, d1, c1), Value::Pi(q2, d2, c2)) => {
             q1 == q2 && equiv(ast, d1, d2, depth) && {
                 let var = Value::Neutral(Neutral::Var(Level(depth)));

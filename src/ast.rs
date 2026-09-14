@@ -70,7 +70,7 @@ pub struct Level(pub usize);
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Expr {
     Var(Level),
-    Universe,
+    Universe(u32),
     UnitType,
     Unit,
     Pi { quantity: Quantity, domain: ExprId, codomain: ExprId },
