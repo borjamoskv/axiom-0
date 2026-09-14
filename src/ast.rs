@@ -79,6 +79,12 @@ pub enum Expr {
     Ann { term: ExprId, ty: ExprId },
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Command {
+    Eval(ExprId),
+    Let { name: String, ty: Option<ExprId>, term: ExprId },
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AstError {
     ForeignExpr(ExprId),
@@ -102,6 +108,7 @@ pub struct Ast {
 
 struct Node {
     expression: Expr,
+    #[allow(dead_code)]
     span: Option<Span>,
 }
 

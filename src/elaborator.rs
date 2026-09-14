@@ -22,20 +22,60 @@ impl fmt::Display for Error {
 }
 impl std::error::Error for Error {}
 
+#[derive(Debug)]
 pub struct Elaboration {
     pub ty: Value,
 }
 
-pub fn synthesize(ast: &Ast, root: ExprId) -> Result<Elaboration, Error> {
+pub fn synthesize(ast: &Ast, root: ExprId, ctx: &[Value]) -> Result<Elaboration, Error> {
     let mut checker = Checker::new(ast);
-    let ty = checker.synth(root, 0, &[], &[])?;
+    let ty = checker.synth(root, 0, &[], ctx)?;
     Ok(Elaboration { ty })
 }
 
-pub fn check(ast: &Ast, root: ExprId, expected: Value) -> Result<Elaboration, Error> {
+pub fn check(ast: &Ast, root: ExprId, expected: Value, ctx: &[Value]) -> Result<Elaboration, Error> {
     let mut checker = Checker::new(ast);
-    checker.check(root, expected.clone(), 0, &[], &[])?;
+    checker.check(root, expected.clone(), 0, &[], ctx)?;
     Ok(Elaboration { ty: expected })
+}
+
+fn count_variable_usage(ast: &Ast, root: ExprId, target: Level) -> Result<usize, crate::ast::AstError> {
+    let mut count = 0;
+    let mut stack = vec![root];
+    while let Some(expr_id) = stack.pop() {
+        match ast.expr(expr_id)? {
+            Expr::Var(lvl) => {
+                if lvl == target {
+                    count += 1;
+                }
+            }
+            Expr::Lambda { body, .. } => {
+                stack.push(body);
+            }
+            Expr::App { function, argument } => {
+                stack.push(function);
+                stack.push(argument);
+            }
+            Expr::Pi { domain, codomain, .. } => {
+                stack.push(domain);
+                stack.push(codomain);
+            }
+            Expr::Ann { term, ty } => {
+                stack.push(term);
+                stack.push(ty);
+            }
+            Expr::Unit | Expr::UnitType | Expr::Universe => {}
+        }
+    }
+    Ok(count)
+}
+
+fn observed_quantity(count: usize) -> Quantity {
+    match count {
+        0 => Quantity::Zero,
+        1 => Quantity::One,
+        _ => Quantity::Omega,
+    }
 }
 
 struct Checker<'a> {
@@ -59,6 +99,14 @@ impl<'a> Checker<'a> {
                 if quantity != decl_q {
                     return Err(Error::QuantityMismatch { expr, expected: decl_q, found: quantity });
                 }
+
+                // Verificación cuantitativa estricta de recursos (QTT)
+                let usage_count = count_variable_usage(self.ast, body, Level(depth))?;
+                let observed = observed_quantity(usage_count);
+                if !decl_q.permits(observed) {
+                    return Err(Error::UsageMismatch { expr, declared: decl_q, observed });
+                }
+
                 let var = Value::Neutral(crate::eval::Neutral::Var(Level(depth)));
                 let mut new_env = env.to_vec();
                 new_env.push(var.clone());

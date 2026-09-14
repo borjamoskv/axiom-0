@@ -204,10 +204,10 @@ fn main() {
     println!("\n[3/3] Ejecutando 10.000 parses con diversidad sintáctica...");
     let sources = [
         "()",
-        "Type",
+        "type",
         "(fn :^1 x -> x) ()",
         "fn :^w x -> x",
-        "() : Type",
+        "() : type",
         "(fn :^0 x -> ()) ()",
     ];
 

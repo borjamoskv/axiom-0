@@ -17,7 +17,7 @@ path = "src/main.rs"
 [dependencies]
 
 [lints.rust]
-unsafe_code = "forbid"
+unsafe_code = "deny"
 
 [profile.release]
 opt-level = 3

@@ -1,4 +1,4 @@
-use crate::ast::{Ast, AstError, Expr, ExprId, Level, Quantity, Span as AstSpan};
+use crate::ast::{Ast, AstError, Expr, ExprId, Command, Level, Quantity, Span as AstSpan};
 use crate::lexer::{Token, TokenKind, Span as LexerSpan};
 use std::fmt;
 
@@ -39,12 +39,12 @@ pub struct Parser<'a> {
     tokens: &'a [Token<'a>],
     cursor: usize,
     ast: &'a mut Ast,
-    env: Vec<&'a str>,
+    env: Vec<String>,
 }
 
 impl<'a> Parser<'a> {
-    pub fn new(tokens: &'a [Token<'a>], ast: &'a mut Ast) -> Self {
-        Self { tokens, cursor: 0, ast, env: Vec::new() }
+    pub fn new(tokens: &'a [Token<'a>], ast: &'a mut Ast, global_env: &[String]) -> Self {
+        Self { tokens, cursor: 0, ast, env: global_env.to_vec() }
     }
 
     fn peek(&self) -> Option<&'a Token<'a>> { self.tokens.get(self.cursor) }
@@ -61,18 +61,54 @@ impl<'a> Parser<'a> {
         if found == Some(kind) { Ok(self.advance().unwrap()) } else { Err(ParseError::UnexpectedToken { expected, found, span }) }
     }
 
+    pub fn parse_command(&mut self) -> Result<Command, ParseError> {
+        if let Some(tok) = self.peek() {
+            if tok.kind == TokenKind::Let {
+                self.advance();
+                let name_tok = self.expect(TokenKind::Ident, "identifier")?;
+                let name = name_tok.text.to_string();
+                
+                let mut ty = None;
+                if let Some(colon) = self.peek() {
+                    if colon.kind == TokenKind::Colon {
+                        self.advance();
+                        ty = Some(self.parse_expression()?);
+                    }
+                }
+                
+                self.expect(TokenKind::Eq, "'='")?;
+                let term = self.parse_expression()?;
+                
+                if let Some(semi) = self.peek() {
+                    if semi.kind == TokenKind::Semicolon {
+                        self.advance();
+                    }
+                }
+                
+                return Ok(Command::Let { name, ty, term });
+            }
+        }
+        
+        let expr = self.parse_expression()?;
+        if let Some(semi) = self.peek() {
+            if semi.kind == TokenKind::Semicolon {
+                self.advance();
+            }
+        }
+        Ok(Command::Eval(expr))
+    }
+
     pub fn parse_expression(&mut self) -> Result<ExprId, ParseError> {
         let mut expr = self.parse_atom()?;
         while let Some(tok) = self.peek() {
             match tok.kind {
-                TokenKind::Ident | TokenKind::LParen | TokenKind::Fn => {
+                TokenKind::Ident | TokenKind::LParen | TokenKind::Fn | TokenKind::Type => {
                     let argument = self.parse_atom()?;
                     expr = self.ast.push(Expr::App { function: expr, argument })?;
                 }
                 TokenKind::Arrow => {
                     self.advance();
                     let codomain = self.parse_expression()?;
-                    // A -> B degenerates to Pi(Omega, A, B)
                     expr = self.ast.push(Expr::Pi { quantity: Quantity::Omega, domain: expr, codomain })?;
                 }
                 _ => break,
@@ -111,10 +147,8 @@ impl<'a> Parser<'a> {
                 let param_tok = self.expect(TokenKind::Ident, "identifier")?;
                 let param_name = param_tok.text;
                 
-                // check if it's a Pi type `fn(x : A) -> B` or lambda `fn x -> body`
-                // we assume it's just a lambda for now: `fn x -> body`
                 self.expect(TokenKind::Arrow, "'->'")?;
-                self.env.push(param_name);
+                self.env.push(param_name.to_string());
                 let body = self.parse_expression()?;
                 self.env.pop();
                 let end_span = self.tokens.get(self.cursor.saturating_sub(1)).map(|t| t.span).unwrap_or(start_span);
@@ -125,7 +159,7 @@ impl<'a> Parser<'a> {
                 let name = tok.text;
                 let span = convert_span(tok.span);
                 self.advance();
-                let level = self.env.iter().position(|&x| x == name).map(Level).ok_or_else(|| ParseError::UnknownVariable { name: name.to_string(), span })?;
+                let level = self.env.iter().position(|x| x == name).map(Level).ok_or_else(|| ParseError::UnknownVariable { name: name.to_string(), span })?;
                 Ok(self.ast.push_spanned_exact(Expr::Var(level), span)?)
             }
             TokenKind::LParen => {

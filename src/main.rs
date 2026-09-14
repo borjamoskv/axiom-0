@@ -1,3 +1,4 @@
+#![forbid(unsafe_code)]
 use micro_axiom_0::repl::start_repl;
 
 fn main() {
