@@ -65,16 +65,47 @@ pub fn check(
     checker.check(root, expected, types.len(), &[], types)
 }
 
-struct Checker<'a> {
+pub fn synthesize_with_turbine(
+    ast: &Ast,
+    root: ExprId,
+    types: &[Value],
+    turbine: &crate::turbine::TurbineEngine,
+) -> Result<Elaboration, Error> {
+    let mut checker = Checker::with_turbine(ast, turbine);
+    checker.synth(root, types.len(), &[], types)
+}
+
+pub fn check_with_turbine(
+    ast: &Ast,
+    root: ExprId,
+    expected: Value,
+    types: &[Value],
+    turbine: &crate::turbine::TurbineEngine,
+) -> Result<Elaboration, Error> {
+    let mut checker = Checker::with_turbine(ast, turbine);
+    checker.check(root, expected, types.len(), &[], types)
+}
+
+pub struct Checker<'a> {
     ast: &'a Ast,
     seen: Vec<bool>,
+    turbine: Option<&'a crate::turbine::TurbineEngine>,
 }
 
 impl<'a> Checker<'a> {
-    fn new(ast: &'a Ast) -> Self {
+    pub fn new(ast: &'a Ast) -> Self {
         Self {
             ast,
             seen: vec![false; ast.expression_count()],
+            turbine: None,
+        }
+    }
+
+    pub fn with_turbine(ast: &'a Ast, turbine: &'a crate::turbine::TurbineEngine) -> Self {
+        Self {
+            ast,
+            seen: vec![false; ast.expression_count()],
+            turbine: Some(turbine),
         }
     }
 
@@ -129,8 +160,14 @@ impl<'a> Checker<'a> {
                     body_elab.usages.truncate(depth);
                 }
 
+                let out_ty = Value::Pi(decl_q, dom, cod_closure);
+                if let Some(turbine) = self.turbine {
+                    let snap =
+                        crate::turbine::AtomicElabSnapshot::from_value(&out_ty, Quantity::Zero);
+                    let _ = turbine.publish(expr, snap);
+                }
                 return Ok(Elaboration {
-                    ty: Value::Pi(decl_q, dom, cod_closure),
+                    ty: out_ty,
                     usages: body_elab.usages,
                 });
             } else {
@@ -157,6 +194,10 @@ impl<'a> Checker<'a> {
                 found: format!("{:?}", elab.ty),
             });
         }
+        if let Some(turbine) = self.turbine {
+            let snap = crate::turbine::AtomicElabSnapshot::from_value(&elab.ty, Quantity::Zero);
+            let _ = turbine.publish(expr, snap);
+        }
         Ok(Elaboration {
             ty: expected,
             usages: elab.usages,
@@ -174,7 +215,12 @@ impl<'a> Checker<'a> {
         if std::mem::replace(&mut self.seen[expr.index], true) {
             return Err(Error::SharedExpression(expr));
         }
-        self.synth_term(expr, term, depth, env, types)
+        let elab = self.synth_term(expr, term, depth, env, types)?;
+        if let Some(turbine) = self.turbine {
+            let snap = crate::turbine::AtomicElabSnapshot::from_value(&elab.ty, Quantity::Zero);
+            let _ = turbine.publish(expr, snap);
+        }
+        Ok(elab)
     }
 
     fn synth_term(

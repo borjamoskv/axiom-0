@@ -63,6 +63,12 @@ pub struct ExprId {
     pub(crate) index: usize,
 }
 
+impl ExprId {
+    pub const fn index(self) -> usize {
+        self.index
+    }
+}
+
 impl fmt::Display for ExprId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "e{}:{}", self.arena.0, self.index)
