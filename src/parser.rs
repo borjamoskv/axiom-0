@@ -1,0 +1,149 @@
+use crate::ast::{Ast, AstError, Expr, ExprId, Level, Quantity, Span as AstSpan};
+use crate::lexer::{Token, TokenKind, Span as LexerSpan};
+use std::fmt;
+
+#[derive(Debug, Clone)]
+pub enum ParseError {
+    UnexpectedEof,
+    UnexpectedToken {
+        expected: &'static str,
+        found: Option<TokenKind>,
+        span: Option<AstSpan>,
+    },
+    UnknownVariable {
+        name: String,
+        span: AstSpan,
+    },
+    AstError(AstError),
+}
+
+impl From<AstError> for ParseError {
+    fn from(err: AstError) -> Self { Self::AstError(err) }
+}
+
+impl fmt::Display for ParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UnexpectedEof => write!(f, "unexpected end of file"),
+            Self::UnexpectedToken { expected, found, .. } => write!(f, "expected {}, but found {:?}", expected, found),
+            Self::UnknownVariable { name, .. } => write!(f, "unknown variable '{}'", name),
+            Self::AstError(err) => write!(f, "ast error: {}", err),
+        }
+    }
+}
+impl std::error::Error for ParseError {}
+
+fn convert_span(span: LexerSpan) -> AstSpan { AstSpan::new(span.start, span.end).unwrap() }
+
+pub struct Parser<'a> {
+    tokens: &'a [Token<'a>],
+    cursor: usize,
+    ast: &'a mut Ast,
+    env: Vec<&'a str>,
+}
+
+impl<'a> Parser<'a> {
+    pub fn new(tokens: &'a [Token<'a>], ast: &'a mut Ast) -> Self {
+        Self { tokens, cursor: 0, ast, env: Vec::new() }
+    }
+
+    fn peek(&self) -> Option<&'a Token<'a>> { self.tokens.get(self.cursor) }
+
+    fn advance(&mut self) -> Option<&'a Token<'a>> {
+        let tok = self.peek()?;
+        self.cursor += 1;
+        Some(tok)
+    }
+
+    fn expect(&mut self, kind: TokenKind, expected: &'static str) -> Result<&'a Token<'a>, ParseError> {
+        let span = self.peek().map(|t| convert_span(t.span));
+        let found = self.peek().map(|t| t.kind);
+        if found == Some(kind) { Ok(self.advance().unwrap()) } else { Err(ParseError::UnexpectedToken { expected, found, span }) }
+    }
+
+    pub fn parse_expression(&mut self) -> Result<ExprId, ParseError> {
+        let mut expr = self.parse_atom()?;
+        while let Some(tok) = self.peek() {
+            match tok.kind {
+                TokenKind::Ident | TokenKind::LParen | TokenKind::Fn => {
+                    let argument = self.parse_atom()?;
+                    expr = self.ast.push(Expr::App { function: expr, argument })?;
+                }
+                TokenKind::Arrow => {
+                    self.advance();
+                    let codomain = self.parse_expression()?;
+                    // A -> B degenerates to Pi(Omega, A, B)
+                    expr = self.ast.push(Expr::Pi { quantity: Quantity::Omega, domain: expr, codomain })?;
+                }
+                _ => break,
+            }
+        }
+        if let Some(tok) = self.peek() {
+            if tok.kind == TokenKind::Colon {
+                self.advance();
+                let ty = self.parse_expression()?;
+                expr = self.ast.push(Expr::Ann { term: expr, ty })?;
+            }
+        }
+        Ok(expr)
+    }
+
+    fn parse_atom(&mut self) -> Result<ExprId, ParseError> {
+        let tok = self.peek().ok_or(ParseError::UnexpectedEof)?;
+        match tok.kind {
+            TokenKind::Type => {
+                let span = convert_span(tok.span);
+                self.advance();
+                Ok(self.ast.push_spanned_exact(Expr::Universe, span)?)
+            }
+            TokenKind::Fn => {
+                let start_span = tok.span;
+                self.advance();
+                let mut quantity = Quantity::Omega;
+                if let Some(qtok) = self.peek() {
+                    match qtok.kind {
+                        TokenKind::QuantZero => { quantity = Quantity::Zero; self.advance(); }
+                        TokenKind::QuantOne => { quantity = Quantity::One; self.advance(); }
+                        TokenKind::QuantOmega => { quantity = Quantity::Omega; self.advance(); }
+                        _ => {}
+                    }
+                }
+                let param_tok = self.expect(TokenKind::Ident, "identifier")?;
+                let param_name = param_tok.text;
+                
+                // check if it's a Pi type `fn(x : A) -> B` or lambda `fn x -> body`
+                // we assume it's just a lambda for now: `fn x -> body`
+                self.expect(TokenKind::Arrow, "'->'")?;
+                self.env.push(param_name);
+                let body = self.parse_expression()?;
+                self.env.pop();
+                let end_span = self.tokens.get(self.cursor.saturating_sub(1)).map(|t| t.span).unwrap_or(start_span);
+                let span = AstSpan::new(start_span.start, end_span.end).unwrap();
+                Ok(self.ast.push_spanned_exact(Expr::Lambda { quantity, body }, span)?)
+            }
+            TokenKind::Ident => {
+                let name = tok.text;
+                let span = convert_span(tok.span);
+                self.advance();
+                let level = self.env.iter().position(|&x| x == name).map(Level).ok_or_else(|| ParseError::UnknownVariable { name: name.to_string(), span })?;
+                Ok(self.ast.push_spanned_exact(Expr::Var(level), span)?)
+            }
+            TokenKind::LParen => {
+                let start_span = tok.span;
+                self.advance();
+                if let Some(next) = self.peek() {
+                    if next.kind == TokenKind::RParen {
+                        let end_span = next.span;
+                        self.advance();
+                        let span = AstSpan::new(start_span.start, end_span.end).unwrap();
+                        return Ok(self.ast.push_spanned_exact(Expr::Unit, span)?);
+                    }
+                }
+                let expr = self.parse_expression()?;
+                self.expect(TokenKind::RParen, "')'")?;
+                Ok(expr)
+            }
+            _ => Err(ParseError::UnexpectedToken { expected: "expression", found: Some(tok.kind), span: Some(convert_span(tok.span)) }),
+        }
+    }
+}

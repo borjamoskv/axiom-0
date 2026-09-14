@@ -1,30 +1,20 @@
-use micro_axiom_0::{
-    ast::{Ast, Expr, Level, Quantity},
-    elaborator,
-};
+use micro_axiom_0::ast::{Ast, Expr, Quantity};
+use micro_axiom_0::elaborator::check;
+use micro_axiom_0::eval::eval;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Smoke example: ((λ¹ x. x) : Unit →¹ Unit) ().
     let mut ast = Ast::new();
-    let unit = ast.unit_type();
-    let identity_ty = ast.function_type(Quantity::One, unit, unit)?;
-    let variable = ast.push(Expr::Var(Level(0)))?;
-    let identity = ast.push(Expr::Lambda {
-        quantity: Quantity::One,
-        body: variable,
-    })?;
-    let function = ast.push(Expr::Ann {
-        term: identity,
-        ty: identity_ty,
-    })?;
-    let argument = ast.push(Expr::Unit)?;
-    let root = ast.push(Expr::App { function, argument })?;
-    let result = elaborator::synthesize(&ast, root)?;
-    println!(
-        "Micro-AXIOM-0: {:?}; nodes={}; frames={}",
-        ast.ty(result.ty)?,
-        result.visited_nodes,
-        result.processed_frames()
-    );
+
+    let unit = ast.push(Expr::UnitType)?;
+    let identity_ty = ast.push(Expr::Pi { quantity: Quantity::One, domain: unit, codomain: unit })?;
+
+    let body = ast.push(Expr::Var(micro_axiom_0::ast::Level(0)))?;
+    let identity = ast.push(Expr::Lambda { quantity: Quantity::One, body })?;
+
+    let identity_val = eval(&ast, identity_ty, &[]);
+    let result = check(&ast, identity, identity_val)?;
+
+    println!("Success! Evaluated type: {:?}", result.ty);
+
     Ok(())
 }
