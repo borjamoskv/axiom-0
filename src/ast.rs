@@ -1,4 +1,7 @@
-use std::{fmt, sync::atomic::{AtomicUsize, Ordering}};
+use std::{
+    fmt,
+    sync::atomic::{AtomicUsize, Ordering},
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Quantity {
@@ -22,13 +25,20 @@ impl Quantity {
         }
     }
     pub const fn permits(self, observed: Self) -> bool {
-        matches!((self, observed), (Self::Zero, Self::Zero) | (Self::One, Self::One) | (Self::Omega, _))
+        matches!(
+            (self, observed),
+            (Self::Zero, Self::Zero) | (Self::One, Self::One) | (Self::Omega, _)
+        )
     }
 }
 
 impl fmt::Display for Quantity {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self { Self::Zero => "0", Self::One => "1", Self::Omega => "ω" })
+        f.write_str(match self {
+            Self::Zero => "0",
+            Self::One => "1",
+            Self::Omega => "ω",
+        })
     }
 }
 
@@ -39,7 +49,11 @@ pub(crate) struct ArenaId(usize);
 
 impl ArenaId {
     fn fresh() -> Self {
-        Self(NEXT_ARENA.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1)).expect("arena exhaust"))
+        Self(
+            NEXT_ARENA
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
+                .expect("arena exhaust"),
+        )
     }
 }
 
@@ -50,18 +64,31 @@ pub struct ExprId {
 }
 
 impl fmt::Display for ExprId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "e{}:{}", self.arena.0, self.index) }
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "e{}:{}", self.arena.0, self.index)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Span { pub start: usize, pub end: usize }
+pub struct Span {
+    pub start: usize,
+    pub end: usize,
+}
 
 impl Span {
     pub const fn new(start: usize, end: usize) -> Option<Self> {
-        if start <= end { Some(Self { start, end }) } else { None }
+        if start <= end {
+            Some(Self { start, end })
+        } else {
+            None
+        }
     }
-    pub const fn start(self) -> usize { self.start }
-    pub const fn end(self) -> usize { self.end }
+    pub const fn start(self) -> usize {
+        self.start
+    }
+    pub const fn end(self) -> usize {
+        self.end
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -73,16 +100,33 @@ pub enum Expr {
     Universe(u32),
     UnitType,
     Unit,
-    Pi { quantity: Quantity, domain: ExprId, codomain: ExprId },
-    Lambda { quantity: Quantity, body: ExprId },
-    App { function: ExprId, argument: ExprId },
-    Ann { term: ExprId, ty: ExprId },
+    Pi {
+        quantity: Quantity,
+        domain: ExprId,
+        codomain: ExprId,
+    },
+    Lambda {
+        quantity: Quantity,
+        body: ExprId,
+    },
+    App {
+        function: ExprId,
+        argument: ExprId,
+    },
+    Ann {
+        term: ExprId,
+        ty: ExprId,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Command {
     Eval(ExprId),
-    Let { name: String, ty: Option<ExprId>, term: ExprId },
+    Let {
+        name: String,
+        ty: Option<ExprId>,
+        term: ExprId,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -113,12 +157,19 @@ struct Node {
 }
 
 impl Default for Ast {
-    fn default() -> Self { Self { arena: ArenaId::fresh(), expressions: Vec::new() } }
+    fn default() -> Self {
+        Self {
+            arena: ArenaId::fresh(),
+            expressions: Vec::new(),
+        }
+    }
 }
 
 impl Ast {
-    pub fn new() -> Self { Self::default() }
-    
+    pub fn new() -> Self {
+        Self::default()
+    }
+
     pub fn push(&mut self, expression: Expr) -> Result<ExprId, AstError> {
         self.push_spanned(expression, None)
     }
@@ -128,15 +179,25 @@ impl Ast {
     }
 
     fn push_spanned(&mut self, expression: Expr, span: Option<Span>) -> Result<ExprId, AstError> {
-        let id = ExprId { arena: self.arena, index: self.expressions.len() };
+        let id = ExprId {
+            arena: self.arena,
+            index: self.expressions.len(),
+        };
         self.expressions.push(Node { expression, span });
         Ok(id)
     }
 
     pub fn expr(&self, id: ExprId) -> Result<Expr, AstError> {
-        if id.arena != self.arena { return Err(AstError::ForeignExpr(id)); }
-        self.expressions.get(id.index).map(|n| n.expression).ok_or(AstError::UnknownExpr(id))
+        if id.arena != self.arena {
+            return Err(AstError::ForeignExpr(id));
+        }
+        self.expressions
+            .get(id.index)
+            .map(|n| n.expression)
+            .ok_or(AstError::UnknownExpr(id))
     }
 
-    pub fn expression_count(&self) -> usize { self.expressions.len() }
+    pub fn expression_count(&self) -> usize {
+        self.expressions.len()
+    }
 }

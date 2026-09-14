@@ -1,6 +1,6 @@
-use micro_axiom_0::ast::{Ast, Expr, Quantity, Level};
-use micro_axiom_0::eval::{eval, Value, Closure};
-use micro_axiom_0::elaborator::{synthesize, check};
+use micro_axiom_0::ast::{Ast, Expr, Level, Quantity};
+use micro_axiom_0::elaborator::{check, synthesize};
+use micro_axiom_0::eval::{Closure, Value, eval};
 use micro_axiom_0::lexer::Lexer;
 use micro_axiom_0::parser::Parser;
 use micro_axiom_0::seqlock::{ReadError, SeqlockCell, WriteError};
@@ -103,13 +103,29 @@ fn main() {
     }
     let elapsed_seqlock = t0.elapsed();
 
-    println!("  ├── Commits completados: {}/{}", total_committed, TOTAL_COMMITS);
-    println!("  ├── Contenciones reales registradas: {}", total_contentions);
+    println!(
+        "  ├── Commits completados: {}/{}",
+        total_committed, TOTAL_COMMITS
+    );
+    println!(
+        "  ├── Contenciones reales registradas: {}",
+        total_contentions
+    );
     println!("  ├── Lecturas atómicas totales: {}", total_reads);
-    println!("  ├── Lecturas rotas (Torn Reads): {} [FALSIFICACIÓN POPPERIANA]", total_torn);
+    println!(
+        "  ├── Lecturas rotas (Torn Reads): {} [FALSIFICACIÓN POPPERIANA]",
+        total_torn
+    );
     assert_eq!(total_torn, 0, "Colapso de consistencia seqlock!");
-    assert!(total_contentions > 0, "No hubo contención real, test inválido!");
-    println!("  └── Rendimiento Seqlock: {:.2?} ({:.1} ns/commit)", elapsed_seqlock, elapsed_seqlock.as_nanos() as f64 / TOTAL_COMMITS as f64);
+    assert!(
+        total_contentions > 0,
+        "No hubo contención real, test inválido!"
+    );
+    println!(
+        "  └── Rendimiento Seqlock: {:.2?} ({:.1} ns/commit)",
+        elapsed_seqlock,
+        elapsed_seqlock.as_nanos() as f64 / TOTAL_COMMITS as f64
+    );
 
     // -------------------------------------------------------------
     // FASE 2: Elaboración Real y Reducción NbE No Tautológica
@@ -126,13 +142,34 @@ fn main() {
             0 => {
                 // ((fn :^1 x -> x) : (Unit -> Unit)) ()
                 let var_0 = ast.push(Expr::Var(Level(0))).unwrap();
-                let lam = ast.push(Expr::Lambda { quantity: Quantity::One, body: var_0 }).unwrap();
+                let lam = ast
+                    .push(Expr::Lambda {
+                        quantity: Quantity::One,
+                        body: var_0,
+                    })
+                    .unwrap();
                 let u1 = ast.push(Expr::UnitType).unwrap();
                 let u2 = ast.push(Expr::UnitType).unwrap();
-                let fn_ty = ast.push(Expr::Pi { quantity: Quantity::One, domain: u1, codomain: u2 }).unwrap();
-                let ann_lam = ast.push(Expr::Ann { term: lam, ty: fn_ty }).unwrap();
+                let fn_ty = ast
+                    .push(Expr::Pi {
+                        quantity: Quantity::One,
+                        domain: u1,
+                        codomain: u2,
+                    })
+                    .unwrap();
+                let ann_lam = ast
+                    .push(Expr::Ann {
+                        term: lam,
+                        ty: fn_ty,
+                    })
+                    .unwrap();
                 let unit = ast.push(Expr::Unit).unwrap();
-                let app = ast.push(Expr::App { function: ann_lam, argument: unit }).unwrap();
+                let app = ast
+                    .push(Expr::App {
+                        function: ann_lam,
+                        argument: unit,
+                    })
+                    .unwrap();
 
                 let expected_ty = Value::UnitType;
                 check(&ast, app, expected_ty, &[]).expect("check failed");
@@ -146,10 +183,16 @@ fn main() {
                 // Tipos Pi: Unit -> Unit
                 let unit_dom = ast.push(Expr::UnitType).unwrap();
                 let unit_cod = ast.push(Expr::UnitType).unwrap();
-                let pi_ty = ast.push(Expr::Pi { quantity: Quantity::One, domain: unit_dom, codomain: unit_cod }).unwrap();
+                let pi_ty = ast
+                    .push(Expr::Pi {
+                        quantity: Quantity::One,
+                        domain: unit_dom,
+                        codomain: unit_cod,
+                    })
+                    .unwrap();
 
                 let elab = synthesize(&ast, pi_ty, &[]).expect("synth Pi failed");
-                assert!(matches!(elab.ty, Value::Universe));
+                assert!(matches!(elab.ty, Value::Universe(_)));
                 synth_success += 1;
                 total_nodes_allocated += ast.expression_count();
             }
@@ -157,7 +200,12 @@ fn main() {
                 // Anotación: (() : Unit)
                 let unit_val = ast.push(Expr::Unit).unwrap();
                 let unit_ty = ast.push(Expr::UnitType).unwrap();
-                let ann = ast.push(Expr::Ann { term: unit_val, ty: unit_ty }).unwrap();
+                let ann = ast
+                    .push(Expr::Ann {
+                        term: unit_val,
+                        ty: unit_ty,
+                    })
+                    .unwrap();
 
                 let elab = synthesize(&ast, ann, &[]).expect("synth Ann failed");
                 assert!(matches!(elab.ty, Value::UnitType));
@@ -167,16 +215,28 @@ fn main() {
             _ => {
                 // Función compuesta de 2 niveles: fn :^w x -> fn :^1 y -> y
                 let var_y = ast.push(Expr::Var(Level(1))).unwrap();
-                let lam_inner = ast.push(Expr::Lambda { quantity: Quantity::One, body: var_y }).unwrap();
-                let lam_outer = ast.push(Expr::Lambda { quantity: Quantity::Omega, body: lam_inner }).unwrap();
+                let lam_inner = ast
+                    .push(Expr::Lambda {
+                        quantity: Quantity::One,
+                        body: var_y,
+                    })
+                    .unwrap();
+                let lam_outer = ast
+                    .push(Expr::Lambda {
+                        quantity: Quantity::Omega,
+                        body: lam_inner,
+                    })
+                    .unwrap();
 
                 let cod_dom = ast.push(Expr::UnitType).unwrap();
                 let cod_cod = ast.push(Expr::UnitType).unwrap();
-                let cod_pi = ast.push(Expr::Pi {
-                    quantity: Quantity::One,
-                    domain: cod_dom,
-                    codomain: cod_cod,
-                }).unwrap();
+                let cod_pi = ast
+                    .push(Expr::Pi {
+                        quantity: Quantity::One,
+                        domain: cod_dom,
+                        codomain: cod_cod,
+                    })
+                    .unwrap();
 
                 let expected_ty = Value::Pi(
                     Quantity::Omega,
@@ -184,7 +244,7 @@ fn main() {
                     Closure {
                         env: vec![],
                         body: cod_pi,
-                    }
+                    },
                 );
                 check(&ast, lam_outer, expected_ty, &[]).expect("check 2-level lambda failed");
                 check_success += 1;
@@ -193,10 +253,23 @@ fn main() {
         }
     }
     let elapsed_nbe = t_nbe.elapsed();
-    println!("  ├── Síntesis de tipos dependientes (synth): {} verificados", synth_success);
-    println!("  ├── Comprobaciones guiadas (check): {} verificadas", check_success);
-    println!("  ├── Nodos AST alocados en Arena: {} nodos", total_nodes_allocated);
-    println!("  └── Rendimiento Elaborador + NbE: {:.2?} ({:.1} ns/operación)", elapsed_nbe, elapsed_nbe.as_nanos() as f64 / 10_000.0);
+    println!(
+        "  ├── Síntesis de tipos dependientes (synth): {} verificados",
+        synth_success
+    );
+    println!(
+        "  ├── Comprobaciones guiadas (check): {} verificadas",
+        check_success
+    );
+    println!(
+        "  ├── Nodos AST alocados en Arena: {} nodos",
+        total_nodes_allocated
+    );
+    println!(
+        "  └── Rendimiento Elaborador + NbE: {:.2?} ({:.1} ns/operación)",
+        elapsed_nbe,
+        elapsed_nbe.as_nanos() as f64 / 10_000.0
+    );
 
     // -------------------------------------------------------------
     // FASE 3: Parser con Diversidad Sintáctica
@@ -221,15 +294,28 @@ fn main() {
         let _root = parser.parse_expression().expect("parse failed");
     }
     let elapsed_parse = t_parse.elapsed();
-    println!("  ├── Variantes sintácticas evaluadas: {} casos rotativos", sources.len());
-    println!("  └── Rendimiento Parser: {:.2?} ({:.1} ns/parse)", elapsed_parse, elapsed_parse.as_nanos() as f64 / 10_000.0);
+    println!(
+        "  ├── Variantes sintácticas evaluadas: {} casos rotativos",
+        sources.len()
+    );
+    println!(
+        "  └── Rendimiento Parser: {:.2?} ({:.1} ns/parse)",
+        elapsed_parse,
+        elapsed_parse.as_nanos() as f64 / 10_000.0
+    );
 
     println!("\n=======================================================");
-    println!(" TIEMPO TOTAL REAL: {:.2?}", elapsed_seqlock + elapsed_nbe + elapsed_parse);
+    println!(
+        " TIEMPO TOTAL REAL: {:.2?}",
+        elapsed_seqlock + elapsed_nbe + elapsed_parse
+    );
     println!(" SEGURIDAD: 100% VERIFICADO EN SAFE RUST (SIN UNSAFE)");
     println!(" ELABORADOR: 100% ACTIVO (ELIMINADO STUB, VARIABLE SCOPING ACTIVO)");
-    println!(" CONTENCIÓN SEQLOCK: {} COLISIONES ATÓMICAS RESUELTAS", total_contentions);
-    println!(" TORN READS: 0 DETECTADOS SOBRE LECTURAS MASIVAS", );
+    println!(
+        " CONTENCIÓN SEQLOCK: {} COLISIONES ATÓMICAS RESUELTAS",
+        total_contentions
+    );
+    println!(" TORN READS: 0 DETECTADOS SOBRE LECTURAS MASIVAS",);
     println!(" ESTADO POPPERIANO: CERTIFICACIÓN RIGUROSA VÁLIDA");
     println!("=======================================================");
 }

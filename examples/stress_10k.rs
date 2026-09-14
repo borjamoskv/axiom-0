@@ -1,5 +1,5 @@
 use micro_axiom_0::ast::{Ast, Expr, Quantity};
-use micro_axiom_0::eval::{eval, equiv, Value};
+use micro_axiom_0::eval::{Value, equiv, eval};
 use micro_axiom_0::lexer::Lexer;
 use micro_axiom_0::parser::Parser;
 use micro_axiom_0::seqlock::{ReadError, SeqlockCell, WriteError};
@@ -70,7 +70,11 @@ fn main() {
                     match cell.try_read(16) {
                         Ok(snap) => {
                             let v = snap.value[0];
-                            assert_eq!(snap.value, [v, v * 2, v * 3, v * 4], "Lectura rota (Torn Read) detectada!");
+                            assert_eq!(
+                                snap.value,
+                                [v, v * 2, v * 3, v * 4],
+                                "Lectura rota (Torn Read) detectada!"
+                            );
                             valid_reads += 1;
                         }
                         Err(ReadError::RetryBudgetExhausted { .. }) => {
@@ -100,10 +104,17 @@ fn main() {
     }
 
     let elapsed_seqlock = t0.elapsed();
-    println!("  -> Commits verificados: {}/{}", total_committed, TOTAL_COMMITS);
+    println!(
+        "  -> Commits verificados: {}/{}",
+        total_committed, TOTAL_COMMITS
+    );
     println!("  -> Contenciones resueltas: {}", total_contentions);
     println!("  -> Lecturas consistentes sin rotura: {}", total_reads);
-    println!("  -> Rendimiento Seqlock: {:.2?} ({:.1} ns/commit)", elapsed_seqlock, elapsed_seqlock.as_nanos() as f64 / TOTAL_COMMITS as f64);
+    println!(
+        "  -> Rendimiento Seqlock: {:.2?} ({:.1} ns/commit)",
+        elapsed_seqlock,
+        elapsed_seqlock.as_nanos() as f64 / TOTAL_COMMITS as f64
+    );
 
     // -------------------------------------------------------------
     // FASE 2: Evaluador NbE Dependiente (10.000 Reducciones Beta-Eta)
@@ -114,9 +125,19 @@ fn main() {
     for _ in 0..10_000 {
         let mut ast = Ast::new();
         let var_0 = ast.push(Expr::Var(micro_axiom_0::ast::Level(0))).unwrap();
-        let lam = ast.push(Expr::Lambda { quantity: Quantity::One, body: var_0 }).unwrap();
+        let lam = ast
+            .push(Expr::Lambda {
+                quantity: Quantity::One,
+                body: var_0,
+            })
+            .unwrap();
         let unit = ast.push(Expr::Unit).unwrap();
-        let app = ast.push(Expr::App { function: lam, argument: unit }).unwrap();
+        let app = ast
+            .push(Expr::App {
+                function: lam,
+                argument: unit,
+            })
+            .unwrap();
 
         let val = eval(&ast, app, &[]);
         assert!(matches!(val, Value::Unit));
@@ -126,7 +147,11 @@ fn main() {
     }
     let elapsed_nbe = t_nbe.elapsed();
     println!("  -> Reducciones NbE verificadas: 10.000/10.000");
-    println!("  -> Rendimiento NbE: {:.2?} ({:.1} ns/reducción)", elapsed_nbe, elapsed_nbe.as_nanos() as f64 / 10_000.0);
+    println!(
+        "  -> Rendimiento NbE: {:.2?} ({:.1} ns/reducción)",
+        elapsed_nbe,
+        elapsed_nbe.as_nanos() as f64 / 10_000.0
+    );
 
     // -------------------------------------------------------------
     // FASE 3: Parser / Lexer Pipeline (10.000 Ciclos de Parseo)
@@ -145,11 +170,18 @@ fn main() {
     }
     let elapsed_parse = t_parse.elapsed();
     println!("  -> Expresiones parseadas: 10.000/10.000");
-    println!("  -> Rendimiento Parser: {:.2?} ({:.1} ns/parse)", elapsed_parse, elapsed_parse.as_nanos() as f64 / 10_000.0);
+    println!(
+        "  -> Rendimiento Parser: {:.2?} ({:.1} ns/parse)",
+        elapsed_parse,
+        elapsed_parse.as_nanos() as f64 / 10_000.0
+    );
 
     println!("\n=======================================================");
     println!(" RESULTADO: 30.000/30.000 OPERACIONES CERTIFICADAS (0 ERRORES)");
-    println!(" TIEMPO TOTAL DE EJECUCIÓN: {:.2?}", elapsed_seqlock + elapsed_nbe + elapsed_parse);
+    println!(
+        " TIEMPO TOTAL DE EJECUCIÓN: {:.2?}",
+        elapsed_seqlock + elapsed_nbe + elapsed_parse
+    );
     println!(" MEMORIA AFÍN / LEAKS: 0 bytes (Garantizado en Arena stack/vector)");
     println!("=======================================================");
 }

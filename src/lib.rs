@@ -4,8 +4,8 @@
 //! (Docs in progress during architectural leap to NbE)
 pub mod ast;
 pub mod elaborator;
-pub mod lexer;
-pub mod seqlock;
-pub mod parser;
 pub mod eval;
+pub mod lexer;
+pub mod parser;
 pub mod repl;
+pub mod seqlock;

@@ -1,6 +1,6 @@
 use crate::ast::{Ast, Expr, ExprId, Level, Quantity};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Value {
     Unit,
     UnitType,
@@ -10,13 +10,13 @@ pub enum Value {
     Neutral(Neutral),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Neutral {
     Var(Level),
     App(Box<Neutral>, Box<Value>),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Closure {
     pub env: Vec<Value>,
     pub body: ExprId,
@@ -33,15 +33,34 @@ impl Closure {
 pub fn eval(ast: &Ast, expr: ExprId, env: &[Value]) -> Value {
     match ast.expr(expr).expect("valid expr") {
         Expr::Var(level) => {
-            if let Some(v) = env.get(level.0) { v.clone() } else { Value::Neutral(Neutral::Var(level)) }
+            if let Some(v) = env.get(level.0) {
+                v.clone()
+            } else {
+                Value::Neutral(Neutral::Var(level))
+            }
         }
         Expr::Unit => Value::Unit,
         Expr::UnitType => Value::UnitType,
         Expr::Universe(level) => Value::Universe(level),
-        Expr::Pi { quantity, domain, codomain } => {
-            Value::Pi(quantity, Box::new(eval(ast, domain, env)), Closure { env: env.to_vec(), body: codomain })
-        }
-        Expr::Lambda { quantity, body } => Value::Lam(quantity, Closure { env: env.to_vec(), body }),
+        Expr::Pi {
+            quantity,
+            domain,
+            codomain,
+        } => Value::Pi(
+            quantity,
+            Box::new(eval(ast, domain, env)),
+            Closure {
+                env: env.to_vec(),
+                body: codomain,
+            },
+        ),
+        Expr::Lambda { quantity, body } => Value::Lam(
+            quantity,
+            Closure {
+                env: env.to_vec(),
+                body,
+            },
+        ),
         Expr::App { function, argument } => {
             let f_val = eval(ast, function, env);
             let a_val = eval(ast, argument, env);
@@ -76,6 +95,18 @@ pub fn equiv(ast: &Ast, a: &Value, b: &Value, depth: usize) -> bool {
                 equiv(ast, &v1, &v2, depth + 1)
             }
         }
+        (Value::Lam(_q, c), Value::Neutral(n)) => {
+            let var = Value::Neutral(Neutral::Var(Level(depth)));
+            let v1 = c.clone().instantiate(ast, var.clone());
+            let v2 = Value::Neutral(Neutral::App(Box::new(n.clone()), Box::new(var)));
+            equiv(ast, &v1, &v2, depth + 1)
+        }
+        (Value::Neutral(n), Value::Lam(_q, c)) => {
+            let var = Value::Neutral(Neutral::Var(Level(depth)));
+            let v1 = Value::Neutral(Neutral::App(Box::new(n.clone()), Box::new(var.clone())));
+            let v2 = c.clone().instantiate(ast, var);
+            equiv(ast, &v1, &v2, depth + 1)
+        }
         (Value::Neutral(n1), Value::Neutral(n2)) => equiv_neu(ast, n1, n2, depth),
         _ => false,
     }
@@ -84,7 +115,9 @@ pub fn equiv(ast: &Ast, a: &Value, b: &Value, depth: usize) -> bool {
 fn equiv_neu(ast: &Ast, n1: &Neutral, n2: &Neutral, depth: usize) -> bool {
     match (n1, n2) {
         (Neutral::Var(l1), Neutral::Var(l2)) => l1 == l2,
-        (Neutral::App(f1, a1), Neutral::App(f2, a2)) => equiv_neu(ast, f1, f2, depth) && equiv(ast, a1, a2, depth),
+        (Neutral::App(f1, a1), Neutral::App(f2, a2)) => {
+            equiv_neu(ast, f1, f2, depth) && equiv(ast, a1, a2, depth)
+        }
         _ => false,
     }
 }
