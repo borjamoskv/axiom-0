@@ -11,12 +11,19 @@ dependencias externas. Usa exclusivamente `std`; prohíbe código `unsafe` propi
 │   ├── lib.rs
 │   ├── main.rs
 │   ├── ast.rs
-│   └── elaborator.rs
+│   ├── elaborator.rs
+│   └── seqlock.rs
+├── docs/
+│   └── MEMORY_MODEL.md
+├── examples/
+│   └── snapshot.rs
 └── tests/
     ├── arena_safety.rs
     ├── elaboration_output.rs
     ├── quantitative.rs
     ├── reference.rs
+    ├── seqlock.rs
+    ├── seqlock_model.rs
     └── structural.rs
 ```
 
@@ -25,6 +32,7 @@ cargo fmt --all -- --check
 cargo test --offline
 cargo clippy --offline --all-targets -- -D warnings
 cargo run --offline --release
+cargo run --offline --release --example snapshot
 ```
 
 ## Fragmento y reglas
@@ -119,5 +127,18 @@ assert!(typed.processed_frames() <= 5 * typed.visited_nodes);
 
 Estas pruebas aportan evidencia de corrección; no constituyen una prueba formal.
 Todavía no se genera código.
-Parser, universos, Π dependiente, metavariables, normalización, Axiom-MM y backend
-quedan pendientes. Este andamiaje no afirma implementar ni validar esas teorías.
+Parser, universos, Π dependiente, metavariables, normalización y backend quedan
+pendientes. Este andamiaje no afirma implementar ni validar esas teorías.
+
+## Ruta A: componente experimental de memoria
+
+`SeqlockCell<T, N>` almacena `N` palabras atómicas del escalar `T`, limitado a
+primitivos nativos. `try_read(presupuesto)` acepta una instantánea coherente o
+agota los intentos; `try_write([T; N])` realiza un único intento de publicación.
+Cada palabra utiliza Release/Acquire y el contador nunca se reutiliza por
+desbordamiento. No se usan lecturas volátiles de objetos ordinarios.
+
+El componente ofrece coherencia de instantáneas y un límite de operaciones por
+llamada. No acota la antigüedad de la lectura ni completa la semántica Axiom-MM.
+El [contrato, argumento de coherencia y límites](docs/MEMORY_MODEL.md) documenta
+la diferencia y las pruebas. El módulo del elaborador mantiene su cota previa.

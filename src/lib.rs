@@ -15,4 +15,5 @@
 //! ```
 pub mod ast;
 pub mod elaborator;
+pub mod lexer;
 pub mod seqlock;
