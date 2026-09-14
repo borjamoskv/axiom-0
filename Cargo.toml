@@ -1,0 +1,28 @@
+[package]
+name = "micro-axiom-0"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Minimal quantitative, bidirectional AXIOM-0 compiler core"
+publish = false
+
+[lib]
+name = "micro_axiom_0"
+path = "src/lib.rs"
+
+[[bin]]
+name = "micro-axiom-0"
+path = "src/main.rs"
+
+[dependencies]
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = "debuginfo"
+
