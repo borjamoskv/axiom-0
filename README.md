@@ -1,7 +1,8 @@
 # Micro-AXIOM-0
 
-Andamiaje de compilador en Rust; biblioteca y ejecutable de ejemplo, sin
-dependencias externas. Usa exclusivamente `std`; prohíbe código `unsafe` propio.
+Andamiaje de compilador en Rust y componente experimental de instantáneas
+atómicas; biblioteca y ejecutables de ejemplo, sin dependencias externas.
+Usa exclusivamente `std`; prohíbe código `unsafe` propio.
 
 ```text
 .
@@ -132,13 +133,36 @@ pendientes. Este andamiaje no afirma implementar ni validar esas teorías.
 
 ## Ruta A: componente experimental de memoria
 
-`SeqlockCell<T, N>` almacena `N` palabras atómicas del escalar `T`, limitado a
-primitivos nativos. `try_read(presupuesto)` acepta una instantánea coherente o
-agota los intentos; `try_write([T; N])` realiza un único intento de publicación.
-Cada palabra utiliza Release/Acquire y el contador nunca se reutiliza por
-desbordamiento. No se usan lecturas volátiles de objetos ordinarios.
+[`SeqlockCell<T, N>`](src/seqlock.rs) está implementado con contenido `[T; N]`:
+cada elemento se almacena en su propio atómico nativo. Un trait sellado limita
+`T` a `bool`, enteros con y sin signo de 8/16/32/64 bits e `isize`/`usize`, según
+el soporte atómico del destino. Cada escritura de una palabra utiliza Release
+y cada lectura Acquire. No se reinterpretan objetos arbitrarios ni se usan
+lecturas volátiles como mecanismo de sincronización.
 
-El componente ofrece coherencia de instantáneas y un límite de operaciones por
-llamada. No acota la antigüedad de la lectura ni completa la semántica Axiom-MM.
-El [contrato, argumento de coherencia y límites](docs/MEMORY_MODEL.md) documenta
-la diferencia y las pruebas. El módulo del elaborador mantiene su cota previa.
+`try_read(presupuesto)` devuelve una instantánea con su contenido, versión par y
+número de intentos, o `ReadError::RetryBudgetExhausted`. Consume como máximo
+`presupuesto × (N + 2)` cargas atómicas; un presupuesto cero falla sin leer.
+`try_write([T; N])` intenta reemplazar todo el contenido una sola vez: devuelve
+la versión publicada o `WriteError::Contended` si no adquiere la escritura.
+Al agotarse el contador devuelve `WriteError::VersionExhausted`; las versiones
+no se reutilizan por desbordamiento y la última instantánea permanece legible.
+Una escritura fallida no modifica el contenido por parte de esa llamada.
+
+`N` expresa la anchura del contenido, **no una cota de frescura**. Una lectura
+aceptada contiene todas las palabras de la versión indicada, que puede ser
+antigua. Los límites cuentan operaciones del programa: no garantizan latencia
+máxima ni éxito bajo contención o ante un escritor suspendido.
+
+Las pruebas del módulo fuerzan contención y agotamiento del contador;
+[`tests/seqlock.rs`](tests/seqlock.rs) comprueba la API y contrasta instantáneas
+con publicaciones concurrentes. Un [modelo finito independiente](tests/seqlock_model.rs)
+explora observaciones de lecturas atómicas, incluidas versiones antiguas y un
+control negativo con palabras Relaxed. Aporta evidencia del protocolo dentro
+de su alcance; no prueba todas las ejecuciones de la implementación.
+El [ejemplo de instantáneas](examples/snapshot.rs) muestra el uso de la API.
+
+El [contrato, argumento de coherencia y límites](docs/MEMORY_MODEL.md) desarrolla
+estas garantías. Este componente no implementa la teoría completa de Axiom-MM
+ni depende de QTT o del elaborador. La cota del elaborador se mantiene para el
+fragmento descrito arriba.

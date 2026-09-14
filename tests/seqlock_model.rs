@@ -46,7 +46,7 @@ const SEQUENCE_WRITES: [usize; 5] = [
 const FIRST_WRITES: [usize; 3] = [INITIAL_FIRST, WRITE_FIRST_FIRST, WRITE_SECOND_FIRST];
 const SECOND_WRITES: [usize; 3] = [INITIAL_SECOND, WRITE_FIRST_SECOND, WRITE_SECOND_SECOND];
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 enum PayloadOrdering {
     ReleaseAcquire,
     Relaxed,
@@ -305,6 +305,53 @@ fn model_allows_old_coherent_observations_and_rejected_mixed_attempts() {
     };
     assert!(allowed(mixed, PayloadOrdering::ReleaseAcquire));
     assert!(!mixed.accepted());
+}
+
+#[test]
+fn permitted_attempts_preserve_sequence_and_publication_coherence() {
+    for ordering in [PayloadOrdering::ReleaseAcquire, PayloadOrdering::Relaxed] {
+        for observation in observations().filter(|observation| allowed(*observation, ordering)) {
+            // These constraints also apply to attempts the reader rejects.
+            assert!(
+                observation.after >= observation.before,
+                "sequence moved backwards: {ordering:?}, {observation:?}"
+            );
+            for generation in observation.words {
+                // Acquiring a completed sequence publishes both payload words,
+                // even when the payload accesses themselves are relaxed.
+                assert!(
+                    generation >= observation.before / 2,
+                    "payload predates acquired commit: {ordering:?}, {observation:?}"
+                );
+                if matches!(ordering, PayloadOrdering::ReleaseAcquire) && generation > 0 {
+                    // Acquiring a payload write carries its writer's beginning
+                    // into HB before the reader's final sequence load.
+                    assert!(
+                        observation.after >= generation * 2 - 1,
+                        "sequence predates acquired payload: {observation:?}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn model_allows_rejected_attempts_while_each_writer_is_in_progress() {
+    for generation in 0..2 {
+        let in_progress = Observation {
+            before: generation * 2,
+            words: [generation, generation + 1],
+            after: generation * 2 + 1,
+        };
+        for ordering in [PayloadOrdering::ReleaseAcquire, PayloadOrdering::Relaxed] {
+            assert!(
+                allowed(in_progress, ordering),
+                "{ordering:?}, {in_progress:?}"
+            );
+        }
+        assert!(!in_progress.accepted());
+    }
 }
 
 #[test]
