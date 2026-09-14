@@ -139,7 +139,7 @@ fn main() {
         let mut lexer = Lexer::new(source);
         let tokens = lexer.tokenize_all().unwrap();
         let mut ast = Ast::new();
-        let mut parser = Parser::new(&tokens, &mut ast);
+        let mut parser = Parser::new(&tokens, &mut ast, &[]);
         let _root = parser.parse_expression().unwrap();
         assert_eq!(ast.expression_count(), 4);
     }

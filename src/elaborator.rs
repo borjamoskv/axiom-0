@@ -25,57 +25,17 @@ impl std::error::Error for Error {}
 #[derive(Debug)]
 pub struct Elaboration {
     pub ty: Value,
+    pub usages: Vec<Quantity>, // De Bruijn index usages
 }
 
-pub fn synthesize(ast: &Ast, root: ExprId, ctx: &[Value]) -> Result<Elaboration, Error> {
+pub fn synthesize(ast: &Ast, root: ExprId, types: &[Value]) -> Result<Elaboration, Error> {
     let mut checker = Checker::new(ast);
-    let ty = checker.synth(root, 0, &[], ctx)?;
-    Ok(Elaboration { ty })
+    checker.synth(root, types.len(), &[], types)
 }
 
-pub fn check(ast: &Ast, root: ExprId, expected: Value, ctx: &[Value]) -> Result<Elaboration, Error> {
+pub fn check(ast: &Ast, root: ExprId, expected: Value, types: &[Value]) -> Result<Elaboration, Error> {
     let mut checker = Checker::new(ast);
-    checker.check(root, expected.clone(), 0, &[], ctx)?;
-    Ok(Elaboration { ty: expected })
-}
-
-fn count_variable_usage(ast: &Ast, root: ExprId, target: Level) -> Result<usize, crate::ast::AstError> {
-    let mut count = 0;
-    let mut stack = vec![root];
-    while let Some(expr_id) = stack.pop() {
-        match ast.expr(expr_id)? {
-            Expr::Var(lvl) => {
-                if lvl == target {
-                    count += 1;
-                }
-            }
-            Expr::Lambda { body, .. } => {
-                stack.push(body);
-            }
-            Expr::App { function, argument } => {
-                stack.push(function);
-                stack.push(argument);
-            }
-            Expr::Pi { domain, codomain, .. } => {
-                stack.push(domain);
-                stack.push(codomain);
-            }
-            Expr::Ann { term, ty } => {
-                stack.push(term);
-                stack.push(ty);
-            }
-            Expr::Unit | Expr::UnitType | Expr::Universe => {}
-        }
-    }
-    Ok(count)
-}
-
-fn observed_quantity(count: usize) -> Quantity {
-    match count {
-        0 => Quantity::Zero,
-        1 => Quantity::One,
-        _ => Quantity::Omega,
-    }
+    checker.check(root, expected, types.len(), &[], types)
 }
 
 struct Checker<'a> {
@@ -88,91 +48,105 @@ impl<'a> Checker<'a> {
         Self { ast, seen: vec![false; ast.expression_count()] }
     }
 
-    fn check(&mut self, expr: ExprId, expected: Value, depth: usize, env: &[Value], ctx: &[Value]) -> Result<(), Error> {
+    fn check(&mut self, expr: ExprId, expected: Value, depth: usize, env: &[Value], types: &[Value]) -> Result<Elaboration, Error> {
         let term = self.ast.expr(expr)?;
-        if std::mem::replace(&mut self.seen[expr.index], true) {
-            return Err(Error::SharedExpression(expr));
-        }
+        if std::mem::replace(&mut self.seen[expr.index], true) { return Err(Error::SharedExpression(expr)); }
 
         if let Expr::Lambda { quantity, body } = term {
             if let Value::Pi(decl_q, dom, cod_closure) = expected {
-                if quantity != decl_q {
-                    return Err(Error::QuantityMismatch { expr, expected: decl_q, found: quantity });
-                }
-
-                // Verificación cuantitativa estricta de recursos (QTT)
-                let usage_count = count_variable_usage(self.ast, body, Level(depth))?;
-                let observed = observed_quantity(usage_count);
-                if !decl_q.permits(observed) {
-                    return Err(Error::UsageMismatch { expr, declared: decl_q, observed });
-                }
-
+                if quantity != decl_q { return Err(Error::QuantityMismatch { expr, expected: decl_q, found: quantity }); }
                 let var = Value::Neutral(crate::eval::Neutral::Var(Level(depth)));
                 let mut new_env = env.to_vec();
                 new_env.push(var.clone());
-                let mut new_ctx = ctx.to_vec();
-                new_ctx.push((*dom).clone());
+                
                 let expected_body_ty = cod_closure.instantiate(self.ast, var);
-                self.check(body, expected_body_ty, depth + 1, &new_env, &new_ctx)?;
-                return Ok(());
+                let mut new_types = types.to_vec();
+                new_types.push(*dom);
+                
+                let mut body_elab = self.check(body, expected_body_ty, depth + 1, &new_env, &new_types)?;
+                
+                let observed = if body_elab.usages.len() > depth { body_elab.usages[depth] } else { Quantity::Zero };
+                if !decl_q.permits(observed) {
+                    return Err(Error::UsageMismatch { expr, declared: decl_q, observed });
+                }
+                
+                // Truncate the usage of the variable we just bound
+                if body_elab.usages.len() > depth {
+                    body_elab.usages.truncate(depth);
+                }
+                
+                return Ok(Elaboration { ty: Value::Pi(decl_q, Box::new(Value::Universe), crate::eval::Closure { env: vec![], body }), usages: body_elab.usages });
             } else {
                 return Err(Error::ExpectedFunction { expr, found: format!("{:?}", expected) });
             }
         }
 
-        let found = self.synth_term(expr, term, depth, env, ctx)?;
-        if !equiv(self.ast, &found, &expected, depth) {
-            return Err(Error::TypeMismatch {
-                expr,
-                expected: format!("{:?}", expected),
-                found: format!("{:?}", found),
-            });
+        let elab = self.synth_term(expr, term, depth, env, types)?;
+        if !equiv(self.ast, &elab.ty, &expected, depth) {
+            return Err(Error::TypeMismatch { expr, expected: format!("{:?}", expected), found: format!("{:?}", elab.ty) });
         }
-        Ok(())
+        Ok(Elaboration { ty: expected, usages: elab.usages })
     }
 
-    fn synth(&mut self, expr: ExprId, depth: usize, env: &[Value], ctx: &[Value]) -> Result<Value, Error> {
+    fn synth(&mut self, expr: ExprId, depth: usize, env: &[Value], types: &[Value]) -> Result<Elaboration, Error> {
         let term = self.ast.expr(expr)?;
-        if std::mem::replace(&mut self.seen[expr.index], true) {
-            return Err(Error::SharedExpression(expr));
-        }
-        self.synth_term(expr, term, depth, env, ctx)
+        if std::mem::replace(&mut self.seen[expr.index], true) { return Err(Error::SharedExpression(expr)); }
+        self.synth_term(expr, term, depth, env, types)
     }
 
-    fn synth_term(&mut self, expr: ExprId, term: Expr, depth: usize, env: &[Value], ctx: &[Value]) -> Result<Value, Error> {
+    fn synth_term(&mut self, expr: ExprId, term: Expr, depth: usize, env: &[Value], types: &[Value]) -> Result<Elaboration, Error> {
         match term {
             Expr::Var(level) => {
-                ctx.get(level.0)
-                    .cloned()
-                    .ok_or(Error::UnboundVariable { expr, level })
+                if let Some(ty) = types.get(level.0) {
+                    let mut usages = vec![Quantity::Zero; depth.max(level.0 + 1)];
+                    usages[level.0] = Quantity::One;
+                    Ok(Elaboration { ty: ty.clone(), usages })
+                } else {
+                    Err(Error::UnboundVariable { expr, level })
+                }
             }
-            Expr::Universe | Expr::UnitType => Ok(Value::Universe),
-            Expr::Unit => Ok(Value::UnitType),
+            Expr::Universe | Expr::UnitType => Ok(Elaboration { ty: Value::Universe, usages: vec![] }),
+            Expr::Unit => Ok(Elaboration { ty: Value::UnitType, usages: vec![] }),
             Expr::Pi { quantity: _, domain, codomain } => {
-                self.check(domain, Value::Universe, depth, env, ctx)?;
-                let dom_val = eval(self.ast, domain, env);
+                // A type annotation uses variables at quantity ZERO because it is erased at runtime.
+                // We check them, but we multiply their usage by ZERO (or just discard).
+                self.check(domain, Value::Universe, depth, env, types)?;
                 let var = Value::Neutral(crate::eval::Neutral::Var(Level(depth)));
                 let mut new_env = env.to_vec();
                 new_env.push(var);
-                let mut new_ctx = ctx.to_vec();
-                new_ctx.push(dom_val);
-                self.check(codomain, Value::Universe, depth + 1, &new_env, &new_ctx)?;
-                Ok(Value::Universe)
+                let dom_val = eval(self.ast, domain, env);
+                let mut new_types = types.to_vec();
+                new_types.push(dom_val);
+                self.check(codomain, Value::Universe, depth + 1, &new_env, &new_types)?;
+                Ok(Elaboration { ty: Value::Universe, usages: vec![] })
             }
             Expr::Ann { term, ty } => {
-                self.check(ty, Value::Universe, depth, env, ctx)?;
+                self.check(ty, Value::Universe, depth, env, types)?;
                 let ty_val = eval(self.ast, ty, env);
-                self.check(term, ty_val.clone(), depth, env, ctx)?;
-                Ok(ty_val)
+                let elab = self.check(term, ty_val.clone(), depth, env, types)?;
+                Ok(elab)
             }
             Expr::App { function, argument } => {
-                let f_ty = self.synth(function, depth, env, ctx)?;
-                if let Value::Pi(_q, dom, cod) = f_ty {
-                    self.check(argument, *dom, depth, env, ctx)?;
+                let mut f_elab = self.synth(function, depth, env, types)?;
+                if let Value::Pi(decl_q, dom, cod) = f_elab.ty {
+                    let mut arg_elab = self.check(argument, *dom, depth, env, types)?;
+                    
+                    // Multiply argument usages by the Pi declared quantity
+                    for u in arg_elab.usages.iter_mut() {
+                        *u = u.times(decl_q);
+                    }
+                    
+                    // Merge usages using `plus`
+                    let max_len = f_elab.usages.len().max(arg_elab.usages.len());
+                    f_elab.usages.resize(max_len, Quantity::Zero);
+                    for (i, u) in arg_elab.usages.into_iter().enumerate() {
+                        f_elab.usages[i] = f_elab.usages[i].plus(u);
+                    }
+                    
                     let arg_val = eval(self.ast, argument, env);
-                    Ok(cod.instantiate(self.ast, arg_val))
+                    Ok(Elaboration { ty: cod.instantiate(self.ast, arg_val), usages: f_elab.usages })
                 } else {
-                    Err(Error::ExpectedFunction { expr: function, found: format!("{:?}", f_ty) })
+                    Err(Error::ExpectedFunction { expr: function, found: format!("{:?}", f_elab.ty) })
                 }
             }
             Expr::Lambda { .. } => Err(Error::CannotInferLambda(expr)),

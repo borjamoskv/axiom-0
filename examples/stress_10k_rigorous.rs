@@ -135,7 +135,7 @@ fn main() {
                 let app = ast.push(Expr::App { function: ann_lam, argument: unit }).unwrap();
 
                 let expected_ty = Value::UnitType;
-                check(&ast, app, expected_ty).expect("check failed");
+                check(&ast, app, expected_ty, &[]).expect("check failed");
                 check_success += 1;
 
                 let val = eval(&ast, app, &[]);
@@ -148,7 +148,7 @@ fn main() {
                 let unit_cod = ast.push(Expr::UnitType).unwrap();
                 let pi_ty = ast.push(Expr::Pi { quantity: Quantity::One, domain: unit_dom, codomain: unit_cod }).unwrap();
 
-                let elab = synthesize(&ast, pi_ty).expect("synth Pi failed");
+                let elab = synthesize(&ast, pi_ty, &[]).expect("synth Pi failed");
                 assert!(matches!(elab.ty, Value::Universe));
                 synth_success += 1;
                 total_nodes_allocated += ast.expression_count();
@@ -159,7 +159,7 @@ fn main() {
                 let unit_ty = ast.push(Expr::UnitType).unwrap();
                 let ann = ast.push(Expr::Ann { term: unit_val, ty: unit_ty }).unwrap();
 
-                let elab = synthesize(&ast, ann).expect("synth Ann failed");
+                let elab = synthesize(&ast, ann, &[]).expect("synth Ann failed");
                 assert!(matches!(elab.ty, Value::UnitType));
                 synth_success += 1;
                 total_nodes_allocated += ast.expression_count();
@@ -186,7 +186,7 @@ fn main() {
                         body: cod_pi,
                     }
                 );
-                check(&ast, lam_outer, expected_ty).expect("check 2-level lambda failed");
+                check(&ast, lam_outer, expected_ty, &[]).expect("check 2-level lambda failed");
                 check_success += 1;
                 total_nodes_allocated += ast.expression_count();
             }
@@ -217,7 +217,7 @@ fn main() {
         let mut lexer = Lexer::new(src);
         let tokens = lexer.tokenize_all().expect("lex failed");
         let mut ast = Ast::new();
-        let mut parser = Parser::new(&tokens, &mut ast);
+        let mut parser = Parser::new(&tokens, &mut ast, &[]);
         let _root = parser.parse_expression().expect("parse failed");
     }
     let elapsed_parse = t_parse.elapsed();
