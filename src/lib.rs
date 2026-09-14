@@ -7,3 +7,4 @@ pub mod lexer;
 pub mod seqlock;
 pub mod parser;
 pub mod eval;
+pub mod repl;
