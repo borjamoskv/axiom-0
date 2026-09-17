@@ -48,6 +48,10 @@ static NEXT_ARENA: AtomicUsize = AtomicUsize::new(0);
 pub(crate) struct ArenaId(usize);
 
 impl ArenaId {
+    pub(crate) const fn raw(self) -> usize {
+        self.0
+    }
+
     fn fresh() -> Self {
         Self(
             NEXT_ARENA
@@ -139,6 +143,7 @@ pub enum Command {
 pub enum AstError {
     ForeignExpr(ExprId),
     UnknownExpr(ExprId),
+    InvalidSpan(Span),
 }
 
 impl fmt::Display for AstError {
@@ -146,6 +151,9 @@ impl fmt::Display for AstError {
         match self {
             Self::ForeignExpr(id) => write!(f, "expr {id} foreign"),
             Self::UnknownExpr(id) => write!(f, "expr {id} unknown"),
+            Self::InvalidSpan(span) => {
+                write!(f, "invalid span {}..{}", span.start, span.end)
+            }
         }
     }
 }
@@ -158,7 +166,6 @@ pub struct Ast {
 
 struct Node {
     expression: Expr,
-    #[allow(dead_code)]
     span: Option<Span>,
 }
 
@@ -176,6 +183,10 @@ impl Ast {
         Self::default()
     }
 
+    pub(crate) fn arena_id(&self) -> ArenaId {
+        self.arena
+    }
+
     pub fn push(&mut self, expression: Expr) -> Result<ExprId, AstError> {
         self.push_spanned(expression, None)
     }
@@ -185,6 +196,31 @@ impl Ast {
     }
 
     fn push_spanned(&mut self, expression: Expr, span: Option<Span>) -> Result<ExprId, AstError> {
+        match expression {
+            Expr::Pi {
+                domain, codomain, ..
+            } => {
+                self.expr(domain)?;
+                self.expr(codomain)?;
+            }
+            Expr::Lambda { body, .. } => {
+                self.expr(body)?;
+            }
+            Expr::App { function, argument } => {
+                self.expr(function)?;
+                self.expr(argument)?;
+            }
+            Expr::Ann { term, ty } => {
+                self.expr(term)?;
+                self.expr(ty)?;
+            }
+            Expr::Var(_) | Expr::Universe(_) | Expr::UnitType | Expr::Unit => {}
+        }
+        if let Some(span) = span {
+            if span.start > span.end {
+                return Err(AstError::InvalidSpan(span));
+            }
+        }
         let id = ExprId {
             arena: self.arena,
             index: self.expressions.len(),
@@ -194,12 +230,19 @@ impl Ast {
     }
 
     pub fn expr(&self, id: ExprId) -> Result<Expr, AstError> {
+        self.node(id).map(|node| node.expression)
+    }
+
+    pub fn span(&self, id: ExprId) -> Result<Option<Span>, AstError> {
+        self.node(id).map(|node| node.span)
+    }
+
+    fn node(&self, id: ExprId) -> Result<&Node, AstError> {
         if id.arena != self.arena {
             return Err(AstError::ForeignExpr(id));
         }
         self.expressions
             .get(id.index)
-            .map(|n| n.expression)
             .ok_or(AstError::UnknownExpr(id))
     }
 

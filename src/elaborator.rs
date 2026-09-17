@@ -29,6 +29,14 @@ pub enum Error {
         expr: ExprId,
         level: Level,
     },
+    UniverseOverflow {
+        expr: ExprId,
+        level: u32,
+    },
+    ContextLengthMismatch {
+        values: usize,
+        types: usize,
+    },
     UnknownExpr(crate::ast::AstError),
 }
 
@@ -47,22 +55,65 @@ impl std::error::Error for Error {}
 #[derive(Debug)]
 pub struct Elaboration {
     pub ty: Value,
-    pub usages: Vec<Quantity>, // De Bruijn index usages
+    pub usages: Vec<Quantity>, // Usages indexed by De Bruijn level.
 }
 
+/// Synthesize in an open context, interpreting each context entry as a neutral variable.
 pub fn synthesize(ast: &Ast, root: ExprId, types: &[Value]) -> Result<Elaboration, Error> {
-    let mut checker = Checker::new(ast);
-    checker.synth(root, types.len(), &[], types)
+    let env = neutral_environment(types.len());
+    synthesize_in_env(ast, root, &env, types)
 }
 
+/// Synthesize with semantic values and types at corresponding De Bruijn levels.
+pub fn synthesize_in_env(
+    ast: &Ast,
+    root: ExprId,
+    env: &[Value],
+    types: &[Value],
+) -> Result<Elaboration, Error> {
+    validate_context(env, types)?;
+    let mut checker = Checker::new(ast);
+    checker.synth(root, types.len(), env, types)
+}
+
+/// Check in an open context, interpreting each context entry as a neutral variable.
 pub fn check(
     ast: &Ast,
     root: ExprId,
     expected: Value,
     types: &[Value],
 ) -> Result<Elaboration, Error> {
+    let env = neutral_environment(types.len());
+    check_in_env(ast, root, expected, &env, types)
+}
+
+/// Check with semantic values and types at corresponding De Bruijn levels.
+pub fn check_in_env(
+    ast: &Ast,
+    root: ExprId,
+    expected: Value,
+    env: &[Value],
+    types: &[Value],
+) -> Result<Elaboration, Error> {
+    validate_context(env, types)?;
     let mut checker = Checker::new(ast);
-    checker.check(root, expected, types.len(), &[], types)
+    checker.check(root, expected, types.len(), env, types)
+}
+
+fn neutral_environment(depth: usize) -> Vec<Value> {
+    (0..depth)
+        .map(|level| Value::Neutral(crate::eval::Neutral::Var(Level(level))))
+        .collect()
+}
+
+fn validate_context(env: &[Value], types: &[Value]) -> Result<(), Error> {
+    if env.len() != types.len() {
+        return Err(Error::ContextLengthMismatch {
+            values: env.len(),
+            types: types.len(),
+        });
+    }
+    Ok(())
 }
 
 pub fn synthesize_with_turbine(
@@ -71,8 +122,9 @@ pub fn synthesize_with_turbine(
     types: &[Value],
     turbine: &crate::turbine::TurbineEngine,
 ) -> Result<Elaboration, Error> {
+    let env = neutral_environment(types.len());
     let mut checker = Checker::with_turbine(ast, turbine);
-    checker.synth(root, types.len(), &[], types)
+    checker.synth(root, types.len(), &env, types)
 }
 
 pub fn check_with_turbine(
@@ -82,8 +134,9 @@ pub fn check_with_turbine(
     types: &[Value],
     turbine: &crate::turbine::TurbineEngine,
 ) -> Result<Elaboration, Error> {
+    let env = neutral_environment(types.len());
     let mut checker = Checker::with_turbine(ast, turbine);
-    checker.check(root, expected, types.len(), &[], types)
+    checker.check(root, expected, types.len(), &env, types)
 }
 
 pub struct Checker<'a> {
@@ -244,10 +297,15 @@ impl<'a> Checker<'a> {
                     Err(Error::UnboundVariable { expr, level })
                 }
             }
-            Expr::Universe(level) => Ok(Elaboration {
-                ty: Value::Universe(level + 1),
-                usages: vec![],
-            }),
+            Expr::Universe(level) => {
+                let successor = level
+                    .checked_add(1)
+                    .ok_or(Error::UniverseOverflow { expr, level })?;
+                Ok(Elaboration {
+                    ty: Value::Universe(successor),
+                    usages: vec![],
+                })
+            }
             Expr::UnitType => Ok(Elaboration {
                 ty: Value::Universe(0),
                 usages: vec![],

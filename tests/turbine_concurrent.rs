@@ -27,6 +27,9 @@ fn test_turbine_concurrent_readers_and_writers() {
 
     let mut handles = Vec::new();
 
+    let mut ast = Ast::new();
+    let dummy = ast.push(Expr::Unit).unwrap();
+
     // Spawn 4 concurrent reader threads
     for _ in 0..4 {
         let t = Arc::clone(&turbine);
@@ -34,8 +37,6 @@ fn test_turbine_concurrent_readers_and_writers() {
         handles.push(thread::spawn(move || {
             let mut read_count = 0;
             while !s.load(Ordering::Relaxed) {
-                let mut ast = Ast::new();
-                let dummy = ast.push(Expr::Unit).unwrap();
                 if let Ok(snap) = t.try_get_cached(dummy, 16) {
                     let decoded = AtomicElabSnapshot::from_words(snap.value);
                     if decoded.status == ElabStatus::CertifiedValid {
@@ -54,8 +55,6 @@ fn test_turbine_concurrent_readers_and_writers() {
     {
         let t = Arc::clone(&turbine);
         for i in 1..=10_000 {
-            let mut ast = Ast::new();
-            let dummy = ast.push(Expr::Unit).unwrap();
             let snap = AtomicElabSnapshot {
                 status: ElabStatus::CertifiedValid,
                 type_tag: TypeTag::Universe,

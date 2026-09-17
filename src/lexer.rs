@@ -1,7 +1,7 @@
 //! Lexer for the concrete syntax of AXIOM-0.
 //!
-//! Scans UTF-8 source into atomic tokens with byte spans. Zero external dependencies,
-//! strictly allocation-free scanning over source slices.
+//! Scans UTF-8 source into atomic tokens with byte spans. Token text borrows source
+//! slices; collecting tokens and reporting errors may allocate.
 
 use std::fmt;
 
@@ -31,7 +31,7 @@ pub enum TokenKind {
     // Quantitative Annotations
     QuantZero,  // :^0
     QuantOne,   // :^1
-    QuantOmega, // :^w or :^omega
+    QuantOmega, // :^w, :^ω or :^omega
 
     // Punctuation
     LParen,    // (
@@ -148,35 +148,37 @@ impl<'a> Lexer<'a> {
             return Ok(None);
         };
 
-        // Check for quantitative annotations: :^0, :^1, :^w
+        // A quantity must occupy its entire identifier-like suffix. In particular,
+        // :^01 and :^wat are errors, rather than a quantity followed by a token.
         if ch == ':' {
             if let Some((_, '^')) = self.peek() {
                 self.advance(); // consume '^'
-                if let Some((_, q_ch)) = self.peek() {
-                    let kind = match q_ch {
-                        '0' => {
-                            self.advance();
-                            Some(TokenKind::QuantZero)
-                        }
-                        '1' => {
-                            self.advance();
-                            Some(TokenKind::QuantOne)
-                        }
-                        'w' | 'ω' => {
-                            self.advance();
-                            Some(TokenKind::QuantOmega)
-                        }
-                        _ => None,
-                    };
-                    if let Some(kind) = kind {
-                        let end = self.current_pos();
-                        return Ok(Some(Token {
-                            kind,
-                            text: &self.source[start..end],
-                            span: Span { start, end },
-                        }));
+                let quantity_start = self.current_pos();
+                while let Some((_, c)) = self.peek() {
+                    if c.is_alphanumeric() || c == '_' {
+                        self.advance();
+                    } else {
+                        break;
                     }
                 }
+                let end = self.current_pos();
+                let kind = match &self.source[quantity_start..end] {
+                    "0" => TokenKind::QuantZero,
+                    "1" => TokenKind::QuantOne,
+                    "w" | "ω" | "omega" => TokenKind::QuantOmega,
+                    _ => {
+                        return Err(LexerError {
+                            span: Span { start, end },
+                            message: "invalid quantity annotation: expected :^0, :^1, :^w, :^ω or :^omega"
+                                .to_owned(),
+                        });
+                    }
+                };
+                return Ok(Some(Token {
+                    kind,
+                    text: &self.source[start..end],
+                    span: Span { start, end },
+                }));
             }
             if let Some((_, '=')) = self.peek() {
                 self.advance();
@@ -266,7 +268,7 @@ impl<'a> Lexer<'a> {
             }));
         }
 
-        // Numbers (Natural literals)
+        // Natural literals permit a single underscore between digits.
         if ch.is_ascii_digit() {
             while let Some((_, c)) = self.peek() {
                 if c.is_ascii_digit() || c == '_' {
@@ -277,11 +279,24 @@ impl<'a> Lexer<'a> {
             }
             let end = self.current_pos();
             let raw_text = &self.source[start..end];
-            let clean_text: String = raw_text.chars().filter(|&c| c != '_').collect();
-            let val = clean_text.parse::<u64>().map_err(|e| LexerError {
-                span: Span { start, end },
-                message: format!("invalid integer literal: {}", e),
-            })?;
+            if raw_text.ends_with('_') || raw_text.as_bytes().windows(2).any(|pair| pair == b"__") {
+                return Err(LexerError {
+                    span: Span { start, end },
+                    message:
+                        "invalid integer literal: underscores must occur singly between digits"
+                            .to_owned(),
+                });
+            }
+            let val = raw_text
+                .bytes()
+                .filter(|&byte| byte != b'_')
+                .try_fold(0u64, |value, digit| {
+                    value.checked_mul(10)?.checked_add(u64::from(digit - b'0'))
+                })
+                .ok_or_else(|| LexerError {
+                    span: Span { start, end },
+                    message: "invalid integer literal: value exceeds u64::MAX".to_owned(),
+                })?;
             return Ok(Some(Token {
                 kind: TokenKind::NatLiteral(val),
                 text: raw_text,

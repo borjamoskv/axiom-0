@@ -2,6 +2,8 @@ use crate::ast::{Ast, AstError, Command, Expr, ExprId, Level, Quantity, Span as 
 use crate::lexer::{Span as LexerSpan, Token, TokenKind};
 use std::fmt;
 
+const MAX_PARSE_DEPTH: usize = 128;
+
 #[derive(Debug, Clone)]
 pub enum ParseError {
     UnexpectedEof,
@@ -13,6 +15,14 @@ pub enum ParseError {
     UnknownVariable {
         name: String,
         span: AstSpan,
+    },
+    UniverseLevelOverflow {
+        level: u64,
+        span: AstSpan,
+    },
+    NestingLimitExceeded {
+        limit: usize,
+        span: Option<AstSpan>,
     },
     AstError(AstError),
 }
@@ -31,6 +41,12 @@ impl fmt::Display for ParseError {
                 expected, found, ..
             } => write!(f, "expected {}, but found {:?}", expected, found),
             Self::UnknownVariable { name, .. } => write!(f, "unknown variable '{}'", name),
+            Self::UniverseLevelOverflow { level, .. } => {
+                write!(f, "universe level {} exceeds {}", level, u32::MAX)
+            }
+            Self::NestingLimitExceeded { limit, .. } => {
+                write!(f, "expression nesting exceeds the limit of {}", limit)
+            }
             Self::AstError(err) => write!(f, "ast error: {}", err),
         }
     }
@@ -46,6 +62,7 @@ pub struct Parser<'a> {
     cursor: usize,
     ast: &'a mut Ast,
     env: Vec<String>,
+    expression_depth: usize,
 }
 
 impl<'a> Parser<'a> {
@@ -55,6 +72,7 @@ impl<'a> Parser<'a> {
             cursor: 0,
             ast,
             env: global_env.to_vec(),
+            expression_depth: 0,
         }
     }
 
@@ -104,26 +122,54 @@ impl<'a> Parser<'a> {
                 self.expect(TokenKind::Eq, "'='")?;
                 let term = self.parse_expression()?;
 
-                if let Some(semi) = self.peek() {
-                    if semi.kind == TokenKind::Semicolon {
-                        self.advance();
-                    }
-                }
-
+                self.finish_command()?;
                 return Ok(Command::Let { name, ty, term });
             }
         }
 
         let expr = self.parse_expression()?;
+        self.finish_command()?;
+        Ok(Command::Eval(expr))
+    }
+
+    fn finish_command(&mut self) -> Result<(), ParseError> {
         if let Some(semi) = self.peek() {
             if semi.kind == TokenKind::Semicolon {
                 self.advance();
             }
         }
-        Ok(Command::Eval(expr))
+        if let Some(tok) = self.peek() {
+            return Err(ParseError::UnexpectedToken {
+                expected: "end of command",
+                found: Some(tok.kind),
+                span: Some(convert_span(tok.span)),
+            });
+        }
+        Ok(())
     }
 
     pub fn parse_expression(&mut self) -> Result<ExprId, ParseError> {
+        if self.expression_depth >= MAX_PARSE_DEPTH {
+            return Err(ParseError::NestingLimitExceeded {
+                limit: MAX_PARSE_DEPTH,
+                span: self.peek().map(|tok| convert_span(tok.span)),
+            });
+        }
+        self.expression_depth += 1;
+        let result = self.parse_expression_inner();
+        self.expression_depth -= 1;
+        result
+    }
+
+    fn parse_under_binder(&mut self, name: &str) -> Result<ExprId, ParseError> {
+        let outer_len = self.env.len();
+        self.env.push(name.to_owned());
+        let result = self.parse_expression();
+        self.env.truncate(outer_len);
+        result
+    }
+
+    fn parse_expression_inner(&mut self) -> Result<ExprId, ParseError> {
         let mut expr = self.parse_atom()?;
         while let Some(tok) = self.peek() {
             match tok.kind {
@@ -136,7 +182,9 @@ impl<'a> Parser<'a> {
                 }
                 TokenKind::Arrow => {
                     self.advance();
-                    let codomain = self.parse_expression()?;
+                    // Even a non-dependent function introduces a level. An empty
+                    // name is inaccessible to source identifiers.
+                    let codomain = self.parse_under_binder("")?;
                     expr = self.ast.push(Expr::Pi {
                         quantity: Quantity::Omega,
                         domain: expr,
@@ -165,7 +213,11 @@ impl<'a> Parser<'a> {
                 let mut level = 0;
                 if let Some(next_tok) = self.peek() {
                     if let TokenKind::NatLiteral(n) = next_tok.kind {
-                        level = n as u32;
+                        level =
+                            u32::try_from(n).map_err(|_| ParseError::UniverseLevelOverflow {
+                                level: n,
+                                span: convert_span(next_tok.span),
+                            })?;
                         self.advance();
                     }
                 }
@@ -214,9 +266,7 @@ impl<'a> Parser<'a> {
                     self.expect(TokenKind::RParen, "')'")?;
 
                     self.expect(TokenKind::Arrow, "'->'")?;
-                    self.env.push(param_name.to_string());
-                    let codomain = self.parse_expression()?;
-                    self.env.pop();
+                    let codomain = self.parse_under_binder(param_name)?;
 
                     let end_span = self
                         .tokens
@@ -237,9 +287,7 @@ impl<'a> Parser<'a> {
                     let param_name = param_tok.text;
 
                     self.expect(TokenKind::Arrow, "'->'")?;
-                    self.env.push(param_name.to_string());
-                    let body = self.parse_expression()?;
-                    self.env.pop();
+                    let body = self.parse_under_binder(param_name)?;
                     let end_span = self
                         .tokens
                         .get(self.cursor.saturating_sub(1))
@@ -255,16 +303,17 @@ impl<'a> Parser<'a> {
                 let name = tok.text;
                 let span = convert_span(tok.span);
                 self.advance();
-                let level = self
-                    .env
-                    .iter()
-                    .rposition(|x| x == name)
-                    .map(Level)
-                    .ok_or_else(|| ParseError::UnknownVariable {
+                let expr = if let Some(level) = self.env.iter().rposition(|x| x == name) {
+                    Expr::Var(Level(level))
+                } else if name == "UnitType" {
+                    Expr::UnitType
+                } else {
+                    return Err(ParseError::UnknownVariable {
                         name: name.to_string(),
                         span,
-                    })?;
-                Ok(self.ast.push_spanned_exact(Expr::Var(level), span)?)
+                    });
+                };
+                Ok(self.ast.push_spanned_exact(expr, span)?)
             }
             TokenKind::LParen => {
                 let start_span = tok.span;

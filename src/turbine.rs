@@ -1,8 +1,13 @@
-//! Turbine: Lock-free asynchronous parallel inference engine for AXIOM-0.
+//! Turbine: parallel elaboration with bounded-attempt atomic telemetry.
 //!
-//! Integrates the Axiom-MM memory model ([`SeqlockCell`]) into the deep
-//! elaborator pipeline, allowing multi-threaded inference across CPU cores
-//! with zero locks, wait-free snapshot reads, and cache-line aligned telemetry.
+//! Integrates the Axiom-MM memory model ([`SeqlockCell`]) into the elaborator
+//! pipeline. Snapshots summarize a completed elaboration; they omit its typing
+//! context and cannot be used as a memoization cache or a typing certificate.
+//! Snapshot operations can fail under contention. Batch elaboration uses scoped
+//! worker threads and waits for them to finish.
+
+use std::fmt;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::ast::{Ast, ExprId, Quantity};
 use crate::elaborator::{Elaboration, Error, check_with_turbine, synthesize_with_turbine};
@@ -19,7 +24,7 @@ pub enum ElabStatus {
     CertifiedError = 3,
 }
 
-/// Discriminant of a canonical value or type in atomic silicio.
+/// Discriminant of a value or type summarized by telemetry.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(usize)]
 pub enum TypeTag {
@@ -31,8 +36,10 @@ pub enum TypeTag {
     Other = 5,
 }
 
-/// A 4-word atomic snapshot representing the state of an AST node in silicio.
-/// Fits within a single 64-byte L1 cache line (32 bytes payload + sequence metadata).
+/// Four words of telemetry summarizing the state of an AST node.
+///
+/// Slot storage also includes sequence metadata. Neither this type nor its
+/// storage guarantees cache-line alignment or a particular cache-line size.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AtomicElabSnapshot {
     pub status: ElabStatus,
@@ -132,11 +139,18 @@ impl AtomicElabSnapshot {
         }
     }
 
+    /// Reconstructs the simple value summary of a successful elaboration.
+    ///
+    /// The result is telemetry, not evidence that the value is well typed in a
+    /// caller's context. Compound values cannot be reconstructed from these words.
     pub fn to_value(&self) -> Option<Value> {
+        if self.status != ElabStatus::CertifiedValid {
+            return None;
+        }
         match self.type_tag {
             TypeTag::Unit => Some(Value::Unit),
             TypeTag::UnitType => Some(Value::UnitType),
-            TypeTag::Universe => Some(Value::Universe(self.level as u32)),
+            TypeTag::Universe => u32::try_from(self.level).ok().map(Value::Universe),
             TypeTag::Neutral => Some(Value::Neutral(crate::eval::Neutral::Var(
                 crate::ast::Level(self.level),
             ))),
@@ -145,26 +159,116 @@ impl AtomicElabSnapshot {
     }
 }
 
-/// The Turbine Engine: A lock-free concurrent memoization and parallel inference turbine.
+/// Failure to read elaboration telemetry.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TurbineReadError {
+    /// A capacity-only engine has not yet received an in-range publication.
+    Unbound,
+    /// The expression belongs to a different AST arena.
+    ForeignArena,
+    /// The expression has no slot in this engine.
+    OutOfBounds { index: usize, capacity: usize },
+    /// No coherent snapshot was obtained within the requested attempt budget.
+    Read(ReadError),
+}
+
+impl fmt::Display for TurbineReadError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Unbound => f.write_str("turbine is not yet bound to an AST arena"),
+            Self::ForeignArena => f.write_str("expression belongs to a different turbine arena"),
+            Self::OutOfBounds { index, capacity } => {
+                write!(
+                    f,
+                    "expression index {index} exceeds turbine capacity {capacity}"
+                )
+            }
+            Self::Read(error) => error.fmt(f),
+        }
+    }
+}
+
+impl std::error::Error for TurbineReadError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Read(error) => Some(error),
+            _ => None,
+        }
+    }
+}
+
+/// Failure to publish elaboration telemetry.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TurbineWriteError {
+    /// The expression belongs to a different AST arena.
+    ForeignArena,
+    /// The expression has no slot in this engine.
+    OutOfBounds { index: usize, capacity: usize },
+    /// The slot was contended or its sequence counter was exhausted.
+    Write(WriteError),
+}
+
+impl fmt::Display for TurbineWriteError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ForeignArena => f.write_str("expression belongs to a different turbine arena"),
+            Self::OutOfBounds { index, capacity } => {
+                write!(
+                    f,
+                    "expression index {index} exceeds turbine capacity {capacity}"
+                )
+            }
+            Self::Write(error) => error.fmt(f),
+        }
+    }
+}
+
+impl std::error::Error for TurbineWriteError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Write(error) => Some(error),
+            _ => None,
+        }
+    }
+}
+
+// Arena allocation stops before issuing usize::MAX, so it cannot be a valid ID.
+const UNBOUND_ARENA: usize = usize::MAX;
+
+/// Parallel elaboration and atomic telemetry for exactly one AST arena.
 ///
-/// Houses an indexed vector of [`SeqlockCell<usize, 4>`] aligned with the AST arena.
+/// Houses a fixed-size vector of [`SeqlockCell<usize, 4>`]. Slot indices are valid
+/// only for the arena to which this engine is bound. Publications are best effort;
+/// inference always uses the AST and its typing context, not these summaries.
 pub struct TurbineEngine {
+    arena: AtomicUsize,
     slots: Vec<SeqlockCell<usize, 4>>,
 }
 
 impl TurbineEngine {
     /// Creates a new turbine with the specified slot capacity.
+    ///
+    /// The first in-range publication atomically binds the engine to its arena.
+    /// Reads cannot bind the engine and return [`TurbineReadError::Unbound`] until
+    /// this happens. Simultaneous publishers from other arenas are rejected.
     pub fn new(capacity: usize) -> Self {
         let mut slots = Vec::with_capacity(capacity);
         for _ in 0..capacity {
             slots.push(SeqlockCell::new(AtomicElabSnapshot::EMPTY.to_words()));
         }
-        Self { slots }
+        Self {
+            arena: AtomicUsize::new(UNBOUND_ARENA),
+            slots,
+        }
     }
 
-    /// Creates a turbine sized precisely to an AST arena's node count.
+    /// Creates a turbine bound to this arena and its current node count.
+    ///
+    /// Later additions to the AST have no slot in this engine.
     pub fn for_ast(ast: &Ast) -> Self {
-        Self::new(ast.expression_count().max(16))
+        let mut engine = Self::new(ast.expression_count());
+        *engine.arena.get_mut() = ast.arena_id().raw();
+        engine
     }
 
     /// Number of atomic slots in the turbine.
@@ -172,29 +276,71 @@ impl TurbineEngine {
         self.slots.len()
     }
 
-    /// Attempts to read a coherent snapshot of the elaboration state of `expr`.
-    /// Wait-free: takes at most `attempts * (4 + 2)` atomic loads.
+    /// Attempts to read coherent telemetry for `expr` in this engine's arena.
+    ///
+    /// Performs one arena load and at most six atomic loads per read attempt.
+    /// The budget bounds attempts, not the time until a successful snapshot.
+    pub fn try_snapshot(
+        &self,
+        expr: ExprId,
+        attempts: usize,
+    ) -> Result<Snapshot<usize, 4>, TurbineReadError> {
+        let idx = expr.index();
+        let cell = self.slots.get(idx).ok_or(TurbineReadError::OutOfBounds {
+            index: idx,
+            capacity: self.slots.len(),
+        })?;
+        let arena = self.arena.load(Ordering::Acquire);
+        if arena == UNBOUND_ARENA {
+            return Err(TurbineReadError::Unbound);
+        }
+        if arena != expr.arena.raw() {
+            return Err(TurbineReadError::ForeignArena);
+        }
+        cell.try_read(attempts).map_err(TurbineReadError::Read)
+    }
+
+    /// Compatibility alias for [`Self::try_snapshot`].
+    ///
+    /// Despite this historical name, snapshots are telemetry, not cached
+    /// elaborations, and must not be used to skip inference or checking.
     pub fn try_get_cached(
         &self,
         expr: ExprId,
         attempts: usize,
-    ) -> Result<Snapshot<usize, 4>, ReadError> {
-        let idx = expr.index();
-        if let Some(cell) = self.slots.get(idx) {
-            cell.try_read(attempts)
-        } else {
-            Err(ReadError::RetryBudgetExhausted { attempts })
-        }
+    ) -> Result<Snapshot<usize, 4>, TurbineReadError> {
+        self.try_snapshot(expr, attempts)
     }
 
-    /// Publishes a certified elaboration snapshot for `expr`.
-    pub fn publish(&self, expr: ExprId, snapshot: AtomicElabSnapshot) -> Result<usize, WriteError> {
+    /// Publishes telemetry for `expr`, validating its arena and slot first.
+    pub fn publish(
+        &self,
+        expr: ExprId,
+        snapshot: AtomicElabSnapshot,
+    ) -> Result<usize, TurbineWriteError> {
         let idx = expr.index();
-        if let Some(cell) = self.slots.get(idx) {
-            cell.try_write(snapshot.to_words())
-        } else {
-            Err(WriteError::Contended)
+        let cell = self.slots.get(idx).ok_or(TurbineWriteError::OutOfBounds {
+            index: idx,
+            capacity: self.slots.len(),
+        })?;
+        let requested_arena = expr.arena.raw();
+        let arena = self.arena.load(Ordering::Acquire);
+        if arena == UNBOUND_ARENA {
+            match self.arena.compare_exchange(
+                UNBOUND_ARENA,
+                requested_arena,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => {}
+                Err(bound_arena) if bound_arena == requested_arena => {}
+                Err(_) => return Err(TurbineWriteError::ForeignArena),
+            }
+        } else if arena != requested_arena {
+            return Err(TurbineWriteError::ForeignArena);
         }
+        cell.try_write(snapshot.to_words())
+            .map_err(TurbineWriteError::Write)
     }
 
     /// Parallel multi-threaded batch elaboration.
