@@ -124,7 +124,7 @@ impl AtomicElabSnapshot {
                 level: l.0,
                 quantity,
             },
-            Value::Pi(q, _, _) => Self {
+            Value::Pi(_, q, _, _) => Self {
                 status: ElabStatus::CertifiedValid,
                 type_tag: TypeTag::Pi,
                 level: 0,
@@ -247,6 +247,7 @@ pub struct TurbineEngine {
     slots: Vec<SeqlockCell<usize, 4>>,
     meta_ctx: RwLock<Vec<Option<Value>>>,
     pub expr_to_meta: RwLock<std::collections::HashMap<crate::ast::ExprId, crate::ast::MetaId>>,
+    pub inserted_implicits: RwLock<std::collections::HashMap<crate::ast::ExprId, Vec<crate::ast::MetaId>>>,
 }
 
 impl TurbineEngine {
@@ -265,6 +266,7 @@ impl TurbineEngine {
             slots,
             meta_ctx: RwLock::new(Vec::new()),
             expr_to_meta: RwLock::new(std::collections::HashMap::new()),
+            inserted_implicits: RwLock::new(std::collections::HashMap::new()),
         }
     }
 
@@ -298,15 +300,7 @@ impl TurbineEngine {
         match val {
             Value::Meta(id, spine) => {
                 let solution = self.meta_ctx.read().unwrap()[id.0].clone();
-                if let Some(mut sol) = solution {
-                    // Apply spine to the solution
-                    for arg in spine {
-                        sol = match sol {
-                            Value::Lam(_, closure) => closure.instantiate(ast, arg, Some(self)),
-                            Value::Neutral(neu) => Value::Neutral(crate::eval::Neutral::App(Box::new(neu), Box::new(arg))),
-                            _ => panic!("Cannot apply spine to non-lambda in force"),
-                        }
-                    }
+                if let Some(sol) = solution {
                     self.force(ast, sol)
                 } else {
                     Value::Meta(id, spine)

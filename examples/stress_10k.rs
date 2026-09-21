@@ -126,14 +126,14 @@ fn main() {
         let mut ast = Ast::new();
         let var_0 = ast.push(Expr::Var(micro_axiom_0::ast::Level(0))).unwrap();
         let lam = ast
-            .push(Expr::Lambda {
+            .push(Expr::Lambda { plicity: micro_axiom_0::ast::Plicity::Explicit,
                 quantity: Quantity::One,
                 body: var_0,
             })
             .unwrap();
         let unit = ast.push(Expr::Unit).unwrap();
         let app = ast
-            .push(Expr::App {
+            .push(Expr::App { plicity: micro_axiom_0::ast::Plicity::Explicit,
                 function: lam,
                 argument: unit,
             })

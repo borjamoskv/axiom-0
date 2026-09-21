@@ -109,13 +109,14 @@ fn main() {
                     // Declarado Zero (0), pero usado 1 vez en el cuerpo
                     let var = ast.push(Expr::Var(Level(0))).unwrap();
                     let lam = ast
-                        .push(Expr::Lambda {
+                        .push(Expr::Lambda { plicity: micro_axiom_0::ast::Plicity::Explicit,
                             quantity: Quantity::Zero,
                             body: var,
                         })
                         .unwrap();
                     let pi_cod = ast.push(Expr::UnitType).unwrap();
                     let expected_ty = Value::Pi(
+                        micro_axiom_0::ast::Plicity::Explicit,
                         Quantity::Zero,
                         Box::new(Value::UnitType),
                         Closure {
@@ -142,13 +143,14 @@ fn main() {
                     // Declarado One (1), pero usado 0 veces en el cuerpo
                     let unit = ast.push(Expr::Unit).unwrap();
                     let lam = ast
-                        .push(Expr::Lambda {
+                        .push(Expr::Lambda { plicity: micro_axiom_0::ast::Plicity::Explicit,
                             quantity: Quantity::One,
                             body: unit,
                         })
                         .unwrap();
                     let pi_cod = ast.push(Expr::UnitType).unwrap();
                     let expected_ty = Value::Pi(
+                        micro_axiom_0::ast::Plicity::Explicit,
                         Quantity::One,
                         Box::new(Value::UnitType),
                         Closure {
@@ -176,7 +178,7 @@ fn main() {
                     let u1 = ast.push(Expr::UnitType).unwrap();
                     let u2 = ast.push(Expr::UnitType).unwrap();
                     let u_u = ast
-                        .push(Expr::Pi {
+                        .push(Expr::Pi { plicity: micro_axiom_0::ast::Plicity::Explicit,
                             quantity: Quantity::Omega,
                             domain: u1,
                             codomain: u2,
@@ -184,7 +186,7 @@ fn main() {
                         .unwrap();
                     let u3 = ast.push(Expr::UnitType).unwrap();
                     let u_u_u = ast
-                        .push(Expr::Pi {
+                        .push(Expr::Pi { plicity: micro_axiom_0::ast::Plicity::Explicit,
                             quantity: Quantity::Omega,
                             domain: u3,
                             codomain: u_u,
@@ -194,13 +196,13 @@ fn main() {
                     // Constante que toma dos argumentos y retorna ()
                     let ret_unit = ast.push(Expr::Unit).unwrap();
                     let lam_inner = ast
-                        .push(Expr::Lambda {
+                        .push(Expr::Lambda { plicity: micro_axiom_0::ast::Plicity::Explicit,
                             quantity: Quantity::Omega,
                             body: ret_unit,
                         })
                         .unwrap();
                     let lam_f = ast
-                        .push(Expr::Lambda {
+                        .push(Expr::Lambda { plicity: micro_axiom_0::ast::Plicity::Explicit,
                             quantity: Quantity::Omega,
                             body: lam_inner,
                         })
@@ -215,27 +217,28 @@ fn main() {
                     // Aplicamos ann_f a x (Level 0), luego a x (Level 0) de nuevo
                     let var_x1 = ast.push(Expr::Var(Level(0))).unwrap();
                     let app1 = ast
-                        .push(Expr::App {
+                        .push(Expr::App { plicity: micro_axiom_0::ast::Plicity::Explicit,
                             function: ann_f,
                             argument: var_x1,
                         })
                         .unwrap();
                     let var_x2 = ast.push(Expr::Var(Level(0))).unwrap();
                     let app2 = ast
-                        .push(Expr::App {
+                        .push(Expr::App { plicity: micro_axiom_0::ast::Plicity::Explicit,
                             function: app1,
                             argument: var_x2,
                         })
                         .unwrap();
 
                     let lam_bad = ast
-                        .push(Expr::Lambda {
+                        .push(Expr::Lambda { plicity: micro_axiom_0::ast::Plicity::Explicit,
                             quantity: Quantity::One,
                             body: app2,
                         })
                         .unwrap();
                     let pi_cod = ast.push(Expr::UnitType).unwrap();
                     let expected_ty = Value::Pi(
+                        micro_axiom_0::ast::Plicity::Explicit,
                         Quantity::One,
                         Box::new(Value::UnitType),
                         Closure {
@@ -262,13 +265,14 @@ fn main() {
                     // Infracción de anotación de cantidad: Lambda(Zero) vs Pi(One)
                     let unit = ast.push(Expr::Unit).unwrap();
                     let lam = ast
-                        .push(Expr::Lambda {
+                        .push(Expr::Lambda { plicity: micro_axiom_0::ast::Plicity::Explicit,
                             quantity: Quantity::Zero,
                             body: unit,
                         })
                         .unwrap();
                     let pi_cod = ast.push(Expr::UnitType).unwrap();
                     let expected_ty = Value::Pi(
+                        micro_axiom_0::ast::Plicity::Explicit,
                         Quantity::One,
                         Box::new(Value::UnitType),
                         Closure {
@@ -302,7 +306,7 @@ fn main() {
             let u1 = ast.push(Expr::UnitType).unwrap();
             let u2 = ast.push(Expr::UnitType).unwrap();
             let fn_ty = ast
-                .push(Expr::Pi {
+                .push(Expr::Pi { plicity: micro_axiom_0::ast::Plicity::Explicit,
                     quantity: Quantity::One,
                     domain: u1,
                     codomain: u2,
@@ -313,14 +317,14 @@ fn main() {
 
             // Pi(f :^1 (Unit -> Unit)) -> Pi(x :^1 Unit) -> Unit
             let inner_pi = ast
-                .push(Expr::Pi {
+                .push(Expr::Pi { plicity: micro_axiom_0::ast::Plicity::Explicit,
                     quantity: Quantity::One,
                     domain: u3,
                     codomain: u4,
                 })
                 .unwrap();
             let outer_pi = ast
-                .push(Expr::Pi {
+                .push(Expr::Pi { plicity: micro_axiom_0::ast::Plicity::Explicit,
                     quantity: Quantity::One,
                     domain: fn_ty,
                     codomain: inner_pi,
@@ -334,20 +338,20 @@ fn main() {
             let var_f = ast.push(Expr::Var(Level(0))).unwrap();
             let var_x = ast.push(Expr::Var(Level(1))).unwrap();
             let body_app = ast
-                .push(Expr::App {
+                .push(Expr::App { plicity: micro_axiom_0::ast::Plicity::Explicit,
                     function: var_f,
                     argument: var_x,
                 })
                 .unwrap();
 
             let inner_lam = ast
-                .push(Expr::Lambda {
+                .push(Expr::Lambda { plicity: micro_axiom_0::ast::Plicity::Explicit,
                     quantity: Quantity::One,
                     body: body_app,
                 })
                 .unwrap();
             let outer_lam = ast
-                .push(Expr::Lambda {
+                .push(Expr::Lambda { plicity: micro_axiom_0::ast::Plicity::Explicit,
                     quantity: Quantity::One,
                     body: inner_lam,
                 })
@@ -362,7 +366,7 @@ fn main() {
             let u_id1 = ast.push(Expr::UnitType).unwrap();
             let u_id2 = ast.push(Expr::UnitType).unwrap();
             let fn_ty_id = ast
-                .push(Expr::Pi {
+                .push(Expr::Pi { plicity: micro_axiom_0::ast::Plicity::Explicit,
                     quantity: Quantity::One,
                     domain: u_id1,
                     codomain: u_id2,
@@ -370,7 +374,7 @@ fn main() {
                 .unwrap();
             let var_y = ast.push(Expr::Var(Level(0))).unwrap();
             let id_lam = ast
-                .push(Expr::Lambda {
+                .push(Expr::Lambda { plicity: micro_axiom_0::ast::Plicity::Explicit,
                     quantity: Quantity::One,
                     body: var_y,
                 })
@@ -384,13 +388,13 @@ fn main() {
             let unit_val = ast.push(Expr::Unit).unwrap();
 
             let app1 = ast
-                .push(Expr::App {
+                .push(Expr::App { plicity: micro_axiom_0::ast::Plicity::Explicit,
                     function: outer_lam,
                     argument: ann_id,
                 })
                 .unwrap();
             let app2 = ast
-                .push(Expr::App {
+                .push(Expr::App { plicity: micro_axiom_0::ast::Plicity::Explicit,
                     function: app1,
                     argument: unit_val,
                 })
@@ -443,7 +447,7 @@ fn main() {
             for &q in quantities.iter().rev() {
                 let dom = ast.push(Expr::UnitType).unwrap();
                 current_pi = ast
-                    .push(Expr::Pi {
+                    .push(Expr::Pi { plicity: micro_axiom_0::ast::Plicity::Explicit,
                         quantity: q,
                         domain: dom,
                         codomain: current_pi,
@@ -475,7 +479,7 @@ fn main() {
             let mut current_lam = inner_body;
             for &q in quantities.iter().rev() {
                 current_lam = ast
-                    .push(Expr::Lambda {
+                    .push(Expr::Lambda { plicity: micro_axiom_0::ast::Plicity::Explicit,
                         quantity: q,
                         body: current_lam,
                     })

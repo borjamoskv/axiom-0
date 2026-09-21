@@ -6,7 +6,7 @@ use micro_axiom_0::elaborator;
 
 #[test]
 fn test_booleans() {
-    let src = "if True { False } else { True }";
+    let src = "if True then False else True";
     let mut ast = Ast::new();
     let expr = {
         let mut lexer = Lexer::new(src);

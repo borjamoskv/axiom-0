@@ -75,7 +75,7 @@ fn pi_formation_preserves_the_larger_boundary_universe() {
         let domain = ast.push(Expr::Universe(domain_level)).unwrap();
         let codomain = ast.push(Expr::Universe(codomain_level)).unwrap();
         let pi = ast
-            .push(Expr::Pi {
+            .push(Expr::Pi { plicity: micro_axiom_0::ast::Plicity::Explicit,
                 quantity: Quantity::Omega,
                 domain,
                 codomain,
@@ -100,7 +100,7 @@ fn pi_formation_propagates_overflow_in_either_component() {
             (valid_type, overflowing_type)
         };
         let pi = ast
-            .push(Expr::Pi {
+            .push(Expr::Pi { plicity: micro_axiom_0::ast::Plicity::Explicit,
                 quantity: Quantity::Omega,
                 domain,
                 codomain,
@@ -129,7 +129,7 @@ fn pi_formation_rejects_a_non_type_domain_or_codomain() {
             (valid_type, non_type)
         };
         let pi = ast
-            .push(Expr::Pi {
+            .push(Expr::Pi { plicity: micro_axiom_0::ast::Plicity::Explicit,
                 quantity: Quantity::Omega,
                 domain,
                 codomain,

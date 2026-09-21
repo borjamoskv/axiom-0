@@ -5,8 +5,8 @@ pub enum Value {
     Unit,
     UnitType,
     Universe(u32),
-    Pi(Quantity, Box<Value>, Closure),
-    Lam(Quantity, Closure),
+    Pi(crate::ast::Plicity, Quantity, Box<Value>, Closure),
+    Lam(crate::ast::Plicity, Quantity, Closure),
     Sigma(Quantity, Box<Value>, Closure),
     Pair(Box<Value>, Box<Value>),
     Bool,
@@ -19,7 +19,7 @@ pub enum Value {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Neutral {
     Var(Level),
-    App(Box<Neutral>, Box<Value>),
+    App(crate::ast::Plicity, Box<Neutral>, Box<Value>),
     Fst(Box<Neutral>),
     Snd(Box<Neutral>),
 }
@@ -56,7 +56,7 @@ pub fn eval(ast: &Ast, expr: ExprId, env: &[Value], turbine: Option<&crate::turb
             match eval(ast, cond, env, turbine) {
                 Value::True => eval(ast, conseq, env, turbine),
                 Value::False => eval(ast, alt, env, turbine),
-                Value::Neutral(n) => Value::Neutral(Neutral::App(Box::new(n), Box::new(Value::True))), // Simplified for if
+                Value::Neutral(n) => Value::Neutral(Neutral::App(crate::ast::Plicity::Explicit, Box::new(n), Box::new(Value::True))), // Simplified for if
                 _ => panic!("if evaluado sobre no-booleano"),
             }
         }
@@ -80,21 +80,36 @@ pub fn eval(ast: &Ast, expr: ExprId, env: &[Value], turbine: Option<&crate::turb
             _ => panic!("snd sobre no-par"),
         },
         Expr::Universe(level) => Value::Universe(level),
-        Expr::Pi { quantity, domain, codomain } => Value::Pi(
+        Expr::Pi { plicity, quantity, domain, codomain } => Value::Pi(
+            plicity,
             quantity,
             Box::new(eval(ast, domain, env, turbine)),
             Closure { env: env.to_vec(), body: codomain },
         ),
-        Expr::Lambda { quantity, body } => Value::Lam(
+        Expr::Lambda { plicity, quantity, body } => Value::Lam(
+            plicity,
             quantity,
             Closure { env: env.to_vec(), body },
         ),
-        Expr::App { function, argument } => {
-            let f_val = eval(ast, function, env, turbine);
+        Expr::App { plicity, function, argument } => {
+            let mut f_val = eval(ast, function, env, turbine);
+            if let Some(turbine) = turbine {
+                let map = turbine.inserted_implicits.read().unwrap();
+                if let Some(implicits) = map.get(&expr) {
+                    for &imp in implicits {
+                        let imp_val = Value::Meta(imp, env.to_vec());
+                        f_val = match f_val {
+                            Value::Lam(_, _, closure) => closure.instantiate(ast, imp_val, Some(turbine)),
+                            Value::Neutral(neu) => Value::Neutral(Neutral::App(crate::ast::Plicity::Implicit, Box::new(neu), Box::new(imp_val))),
+                            _ => panic!("Cannot apply implicit to non-lambda"),
+                        };
+                    }
+                }
+            }
             let a_val = eval(ast, argument, env, turbine);
             match f_val {
-                Value::Lam(_, closure) => closure.instantiate(ast, a_val, turbine),
-                Value::Neutral(neu) => Value::Neutral(Neutral::App(Box::new(neu), Box::new(a_val))),
+                Value::Lam(_, _, closure) => closure.instantiate(ast, a_val, turbine),
+                Value::Neutral(neu) => Value::Neutral(Neutral::App(plicity, Box::new(neu), Box::new(a_val))),
                 Value::Meta(id, mut spine) => {
                     spine.push(a_val);
                     Value::Meta(id, spine)
@@ -124,7 +139,8 @@ pub fn equiv(ast: &Ast, a: &Value, b: &Value, depth: usize) -> bool {
         (Value::Unit, Value::Unit) => true,
         (Value::UnitType, Value::UnitType) => true,
         (Value::Universe(l1), Value::Universe(l2)) => l1 == l2,
-        (Value::Pi(q1, d1, c1), Value::Pi(q2, d2, c2)) => {
+        (Value::Pi(p1, q1, d1, c1), Value::Pi(p2, q2, d2, c2)) => {
+            if p1 != p2 { return false; }
             q1 == q2 && equiv(ast, d1, d2, depth) && {
                 let var = Value::Neutral(Neutral::Var(Level(depth)));
                 let v1 = c1.clone().instantiate(ast, var.clone(), None);
@@ -132,7 +148,8 @@ pub fn equiv(ast: &Ast, a: &Value, b: &Value, depth: usize) -> bool {
                 equiv(ast, &v1, &v2, depth + 1)
             }
         }
-        (Value::Lam(q1, c1), Value::Lam(q2, c2)) => {
+        (Value::Lam(p1, q1, c1), Value::Lam(p2, q2, c2)) => {
+            if p1 != p2 { return false; }
             q1 == q2 && {
                 let var = Value::Neutral(Neutral::Var(Level(depth)));
                 let v1 = c1.clone().instantiate(ast, var.clone(), None);
@@ -140,15 +157,15 @@ pub fn equiv(ast: &Ast, a: &Value, b: &Value, depth: usize) -> bool {
                 equiv(ast, &v1, &v2, depth + 1)
             }
         }
-        (Value::Lam(_q, c), Value::Neutral(n)) => {
+        (Value::Lam(_p, _q, c), Value::Neutral(n)) => {
             let var = Value::Neutral(Neutral::Var(Level(depth)));
             let v1 = c.clone().instantiate(ast, var.clone(), None);
-            let v2 = Value::Neutral(Neutral::App(Box::new(n.clone()), Box::new(var)));
+            let v2 = Value::Neutral(Neutral::App(crate::ast::Plicity::Explicit, Box::new(n.clone()), Box::new(var)));
             equiv(ast, &v1, &v2, depth + 1)
         }
-        (Value::Neutral(n), Value::Lam(_q, c)) => {
+        (Value::Neutral(n), Value::Lam(_p, _q, c)) => {
             let var = Value::Neutral(Neutral::Var(Level(depth)));
-            let v1 = Value::Neutral(Neutral::App(Box::new(n.clone()), Box::new(var.clone())));
+            let v1 = Value::Neutral(Neutral::App(crate::ast::Plicity::Explicit, Box::new(n.clone()), Box::new(var.clone())));
             let v2 = c.clone().instantiate(ast, var, None);
             equiv(ast, &v1, &v2, depth + 1)
         }
@@ -175,7 +192,8 @@ pub fn equiv(ast: &Ast, a: &Value, b: &Value, depth: usize) -> bool {
 pub fn equiv_neu(ast: &Ast, n1: &Neutral, n2: &Neutral, depth: usize) -> bool {
     match (n1, n2) {
         (Neutral::Var(l1), Neutral::Var(l2)) => l1 == l2,
-        (Neutral::App(f1, a1), Neutral::App(f2, a2)) => {
+        (Neutral::App(p1, f1, a1), Neutral::App(p2, f2, a2)) => {
+            if p1 != p2 { return false; }
             equiv_neu(ast, f1, f2, depth) && equiv(ast, a1, a2, depth)
         }
         (Neutral::Fst(n1), Neutral::Fst(n2)) => equiv_neu(ast, n1, n2, depth),

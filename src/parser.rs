@@ -175,7 +175,16 @@ impl<'a> Parser<'a> {
             match tok.kind {
                 TokenKind::Ident | TokenKind::LParen | TokenKind::Fn | TokenKind::Type | TokenKind::Sigma | TokenKind::If | TokenKind::Question => {
                     let argument = self.parse_atom()?;
-                    expr = self.ast.push(Expr::App {
+                    expr = self.ast.push(Expr::App { plicity: crate::ast::Plicity::Explicit,
+                        function: expr,
+                        argument,
+                    })?;
+                }
+                TokenKind::LBrace => {
+                    self.advance();
+                    let argument = self.parse_expression()?;
+                    self.expect(TokenKind::RBrace, "'}'")?;
+                    expr = self.ast.push(Expr::App { plicity: crate::ast::Plicity::Implicit,
                         function: expr,
                         argument,
                     })?;
@@ -205,7 +214,7 @@ impl<'a> Parser<'a> {
                     // Even a non-dependent function introduces a level. An empty
                     // name is inaccessible to source identifiers.
                     let codomain = self.parse_under_binder("")?;
-                    expr = self.ast.push(Expr::Pi {
+                    expr = self.ast.push(Expr::Pi { plicity: crate::ast::Plicity::Explicit,
                         quantity: Quantity::Omega,
                         domain: expr,
                         codomain,
@@ -276,19 +285,31 @@ impl<'a> Parser<'a> {
                     }
                 }
 
-                let is_pi = if let Some(tok) = self.peek() {
-                    tok.kind == TokenKind::LParen
+                let (is_pi, is_implicit) = if let Some(tok) = self.peek() {
+                    let mut next_cursor = self.cursor + 1;
+                    let is_brace = tok.kind == TokenKind::LBrace;
+                    let mut is_colon = false;
+                    while next_cursor < self.tokens.len() {
+                        let k = self.tokens[next_cursor].kind;
+                        if k == TokenKind::Colon { is_colon = true; break; }
+                        if k == TokenKind::RBrace || k == TokenKind::RParen || k == TokenKind::Arrow { break; }
+                        next_cursor += 1;
+                    }
+                    (is_colon, is_brace)
                 } else {
-                    false
+                    (false, false)
                 };
 
+                let plicity = if is_implicit { crate::ast::Plicity::Implicit } else { crate::ast::Plicity::Explicit };
+
                 if is_pi {
-                    self.advance(); // consume LParen
+                    let end_tok = if is_implicit { TokenKind::RBrace } else { TokenKind::RParen };
+                    self.advance(); // consume LParen/LBrace
                     let param_tok = self.expect(TokenKind::Ident, "identifier")?;
                     let param_name = param_tok.text;
                     self.expect(TokenKind::Colon, "':'")?;
                     let domain = self.parse_expression()?;
-                    self.expect(TokenKind::RParen, "')'")?;
+                    self.expect(end_tok, "closing bracket")?;
 
                     self.expect(TokenKind::Arrow, "'->'")?;
                     let codomain = self.parse_under_binder(param_name)?;
@@ -300,7 +321,7 @@ impl<'a> Parser<'a> {
                         .unwrap_or(start_span);
                     let span = AstSpan::new(start_span.start, end_span.end).unwrap();
                     Ok(self.ast.push_spanned_exact(
-                        Expr::Pi {
+                        Expr::Pi { plicity,
                             quantity,
                             domain,
                             codomain,
@@ -308,8 +329,10 @@ impl<'a> Parser<'a> {
                         span,
                     )?)
                 } else {
+                    if is_implicit { self.advance(); } // consume LBrace
                     let param_tok = self.expect(TokenKind::Ident, "identifier")?;
                     let param_name = param_tok.text;
+                    if is_implicit { self.expect(TokenKind::RBrace, "'}'")?; }
 
                     self.expect(TokenKind::Arrow, "'->'")?;
                     let body = self.parse_under_binder(param_name)?;
@@ -321,7 +344,7 @@ impl<'a> Parser<'a> {
                     let span = AstSpan::new(start_span.start, end_span.end).unwrap();
                     Ok(self
                         .ast
-                        .push_spanned_exact(Expr::Lambda { quantity, body }, span)?)
+                        .push_spanned_exact(Expr::Lambda { plicity, quantity, body }, span)?)
                 }
             }
             TokenKind::Sigma => {
@@ -374,13 +397,10 @@ impl<'a> Parser<'a> {
                 let start_span = tok.span;
                 self.advance();
                 let cond = self.parse_expression()?;
-                self.expect(TokenKind::LBrace, "'{'")?;
+                self.expect(TokenKind::Then, "'then'")?;
                 let conseq = self.parse_expression()?;
-                self.expect(TokenKind::RBrace, "'}'")?;
                 self.expect(TokenKind::Else, "'else'")?;
-                self.expect(TokenKind::LBrace, "'{'")?;
                 let alt = self.parse_expression()?;
-                self.expect(TokenKind::RBrace, "'}'")?;
 
                 let end_span = self
                     .tokens

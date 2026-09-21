@@ -10,8 +10,8 @@ fn main() {
     println!("============================================================\n");
 
     let scripts = vec![
-        ("1. Función Lógica", "let not : fn (b : Bool) -> Bool = fn b -> if b { False } else { True }"),
-        ("2. Definición Topológica (Tipo Sigma Dependiente)", "let DepType : type = sigma (b : Bool) * if b { UnitType } else { Bool }"),
+        ("1. Función Lógica", "let not : fn (b : Bool) -> Bool = fn b -> if b then False else True"),
+        ("2. Definición Topológica (Tipo Sigma Dependiente)", "let DepType : type = sigma (b : Bool) * if b then UnitType else Bool"),
         ("3. Colapso en Rama True (Exige Unit)", "let pair_t : DepType = (True, ())"),
         ("4. Colapso en Rama False (Exige Bool)", "let pair_f : DepType = (False, not False)"),
         ("5. Evaluación NbE (Proyección Fst)", "pair_f.1"),

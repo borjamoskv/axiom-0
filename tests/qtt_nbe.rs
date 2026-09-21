@@ -9,7 +9,7 @@ fn test_nbe_beta_reduction() {
     // Identity: fn x -> x
     let var0 = ast.push(Expr::Var(Level(0))).unwrap();
     let id_lam = ast
-        .push(Expr::Lambda {
+        .push(Expr::Lambda { plicity: micro_axiom_0::ast::Plicity::Explicit,
             quantity: Quantity::One,
             body: var0,
         })
@@ -20,7 +20,7 @@ fn test_nbe_beta_reduction() {
 
     // App: (fn x -> x) ()
     let app = ast
-        .push(Expr::App {
+        .push(Expr::App { plicity: micro_axiom_0::ast::Plicity::Explicit,
             function: id_lam,
             argument: unit_arg,
         })
@@ -40,13 +40,13 @@ fn test_nbe_eta_equality() {
     let var0 = ast.push(Expr::Var(Level(0))).unwrap(); // f
     let var1 = ast.push(Expr::Var(Level(1))).unwrap(); // x
     let app = ast
-        .push(Expr::App {
+        .push(Expr::App { plicity: micro_axiom_0::ast::Plicity::Explicit,
             function: var0,
             argument: var1,
         })
         .unwrap();
     let lam = ast
-        .push(Expr::Lambda {
+        .push(Expr::Lambda { plicity: micro_axiom_0::ast::Plicity::Explicit,
             quantity: Quantity::Omega,
             body: app,
         })
@@ -109,7 +109,7 @@ fn test_qtt_linear_variable_unused_fails() {
     let u0_dom = ast.push(Expr::Universe(0)).unwrap();
     let u1_cod = ast.push(Expr::Universe(1)).unwrap();
     let pi_ty = ast
-        .push(Expr::Pi {
+        .push(Expr::Pi { plicity: micro_axiom_0::ast::Plicity::Explicit,
             quantity: Quantity::One,
             domain: u0_dom,
             codomain: u1_cod,
@@ -120,7 +120,7 @@ fn test_qtt_linear_variable_unused_fails() {
     // Term: fn :^1 x -> type 0 (x is dropped / unused; type 0 has type type 1)
     let body = ast.push(Expr::Universe(0)).unwrap();
     let lam = ast
-        .push(Expr::Lambda {
+        .push(Expr::Lambda { plicity: micro_axiom_0::ast::Plicity::Explicit,
             quantity: Quantity::One,
             body,
         })
@@ -144,7 +144,7 @@ fn test_qtt_erased_variable_used_fails() {
     let u0_dom = ast.push(Expr::Universe(0)).unwrap();
     let u0_cod = ast.push(Expr::Universe(0)).unwrap();
     let pi_ty = ast
-        .push(Expr::Pi {
+        .push(Expr::Pi { plicity: micro_axiom_0::ast::Plicity::Explicit,
             quantity: Quantity::Zero,
             domain: u0_dom,
             codomain: u0_cod,
@@ -155,7 +155,7 @@ fn test_qtt_erased_variable_used_fails() {
     // Term: fn :^0 x -> x (x is used, violating erased quantity 0; x has type type 0)
     let var0 = ast.push(Expr::Var(Level(0))).unwrap();
     let lam = ast
-        .push(Expr::Lambda {
+        .push(Expr::Lambda { plicity: micro_axiom_0::ast::Plicity::Explicit,
             quantity: Quantity::Zero,
             body: var0,
         })
@@ -179,7 +179,7 @@ fn test_qtt_valid_linear_and_erased() {
     let u0_dom = ast.push(Expr::Universe(0)).unwrap();
     let u0_cod = ast.push(Expr::Universe(0)).unwrap();
     let pi_linear = ast
-        .push(Expr::Pi {
+        .push(Expr::Pi { plicity: micro_axiom_0::ast::Plicity::Explicit,
             quantity: Quantity::One,
             domain: u0_dom,
             codomain: u0_cod,
@@ -189,7 +189,7 @@ fn test_qtt_valid_linear_and_erased() {
 
     let var0 = ast.push(Expr::Var(Level(0))).unwrap();
     let lam_linear = ast
-        .push(Expr::Lambda {
+        .push(Expr::Lambda { plicity: micro_axiom_0::ast::Plicity::Explicit,
             quantity: Quantity::One,
             body: var0,
         })
@@ -201,7 +201,7 @@ fn test_qtt_valid_linear_and_erased() {
     let u0_dom2 = ast.push(Expr::Universe(0)).unwrap();
     let u1_cod2 = ast.push(Expr::Universe(1)).unwrap();
     let pi_erased = ast
-        .push(Expr::Pi {
+        .push(Expr::Pi { plicity: micro_axiom_0::ast::Plicity::Explicit,
             quantity: Quantity::Zero,
             domain: u0_dom2,
             codomain: u1_cod2,
@@ -211,7 +211,7 @@ fn test_qtt_valid_linear_and_erased() {
 
     let u0_body = ast.push(Expr::Universe(0)).unwrap();
     let lam_erased = ast
-        .push(Expr::Lambda {
+        .push(Expr::Lambda { plicity: micro_axiom_0::ast::Plicity::Explicit,
             quantity: Quantity::Zero,
             body: u0_body,
         })

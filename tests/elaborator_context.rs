@@ -11,7 +11,7 @@ fn alias_identity(ast: &mut Ast) -> (ExprId, ExprId, ExprId) {
     let domain = variable(ast, 0);
     let codomain = variable(ast, 0);
     let ty = ast
-        .push(Expr::Pi {
+        .push(Expr::Pi { plicity: micro_axiom_0::ast::Plicity::Explicit,
             quantity: Quantity::One,
             domain,
             codomain,
@@ -21,7 +21,7 @@ fn alias_identity(ast: &mut Ast) -> (ExprId, ExprId, ExprId) {
     let body_ty = variable(ast, 0);
     let body = ast.push(Expr::Ann { term, ty: body_ty }).unwrap();
     let lambda = ast
-        .push(Expr::Lambda {
+        .push(Expr::Lambda { plicity: micro_axiom_0::ast::Plicity::Explicit,
             quantity: Quantity::One,
             body,
         })
@@ -36,7 +36,7 @@ fn global_unit_alias_supports_an_annotated_identity_and_application() {
     let (identity, lambda, identity_ty) = alias_identity(&mut ast);
     let argument = ast.push(Expr::Unit).unwrap();
     let application = ast
-        .push(Expr::App {
+        .push(Expr::App { plicity: micro_axiom_0::ast::Plicity::Explicit,
             function: identity,
             argument,
         })
@@ -62,7 +62,7 @@ fn a_pi_domain_can_resolve_a_global_alias_for_a_universe() {
     let domain = variable(&mut ast, 0);
     let codomain = variable(&mut ast, 1);
     let pi = ast
-        .push(Expr::Pi {
+        .push(Expr::Pi { plicity: micro_axiom_0::ast::Plicity::Explicit,
             quantity: Quantity::Zero,
             domain,
             codomain,
@@ -88,14 +88,14 @@ fn neutral_contexts_keep_global_slots_before_dependent_lambda_binders() {
     let inner_domain = variable(&mut ast, 2);
     let inner_codomain = variable(&mut ast, 2);
     let inner_pi = ast
-        .push(Expr::Pi {
+        .push(Expr::Pi { plicity: micro_axiom_0::ast::Plicity::Explicit,
             quantity: Quantity::One,
             domain: inner_domain,
             codomain: inner_codomain,
         })
         .unwrap();
     let outer_pi = ast
-        .push(Expr::Pi {
+        .push(Expr::Pi { plicity: micro_axiom_0::ast::Plicity::Explicit,
             quantity: Quantity::Zero,
             domain: outer_domain,
             codomain: inner_pi,
@@ -105,13 +105,13 @@ fn neutral_contexts_keep_global_slots_before_dependent_lambda_binders() {
     let ty = variable(&mut ast, 2);
     let body = ast.push(Expr::Ann { term, ty }).unwrap();
     let inner_lambda = ast
-        .push(Expr::Lambda {
+        .push(Expr::Lambda { plicity: micro_axiom_0::ast::Plicity::Explicit,
             quantity: Quantity::One,
             body,
         })
         .unwrap();
     let outer_lambda = ast
-        .push(Expr::Lambda {
+        .push(Expr::Lambda { plicity: micro_axiom_0::ast::Plicity::Explicit,
             quantity: Quantity::Zero,
             body: inner_lambda,
         })
@@ -152,7 +152,7 @@ fn neutral_wrappers_preserve_an_abstract_alias_instead_of_unfolding_it() {
     let synthesized = synthesize(&ast, identity, &types).expect("identity at abstract A");
     assert!(equiv(&ast, &synthesized.ty, &abstract_ty, 1));
     match &synthesized.ty {
-        Value::Pi(_, domain, codomain) => {
+        Value::Pi(_, _, domain, codomain) => {
             assert_eq!(domain.as_ref(), &neutral_alias);
             assert_eq!(
                 codomain.clone().instantiate(&ast, Value::Unit, None),

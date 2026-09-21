@@ -7,15 +7,15 @@ fn var(ast: &mut Ast, level: usize) -> ExprId {
 }
 
 fn lambda(ast: &mut Ast, quantity: Quantity, body: ExprId) -> ExprId {
-    ast.push(Expr::Lambda { quantity, body }).unwrap()
+    ast.push(Expr::Lambda { plicity: micro_axiom_0::ast::Plicity::Explicit, quantity, body }).unwrap()
 }
 
 fn app(ast: &mut Ast, function: ExprId, argument: ExprId) -> ExprId {
-    ast.push(Expr::App { function, argument }).unwrap()
+    ast.push(Expr::App { plicity: micro_axiom_0::ast::Plicity::Explicit, function, argument }).unwrap()
 }
 
 fn pi(ast: &mut Ast, quantity: Quantity, domain: ExprId, codomain: ExprId) -> ExprId {
-    ast.push(Expr::Pi {
+    ast.push(Expr::Pi { plicity: micro_axiom_0::ast::Plicity::Explicit,
         quantity,
         domain,
         codomain,

@@ -177,13 +177,9 @@ impl<'a> Checker<'a> {
                 sp1.iter().zip(sp2.iter()).all(|(x, y)| Self::unify(ast, x, y, depth, turbine))
             }
             (Value::Meta(m, sp), val) | (val, Value::Meta(m, sp)) => {
-                if sp.is_empty() {
-                    // Occurs check omitted for simplicity in this MVP
-                    turbine.solve_meta(m, val);
-                    true
-                } else {
-                    false // Pattern unification complex spines omitted
-                }
+                // Occurs check omitted for MVP
+                turbine.solve_meta(m, val);
+                true
             }
             (Value::Unit, Value::Unit) => true,
             (Value::UnitType, Value::UnitType) => true,
@@ -201,7 +197,7 @@ impl<'a> Checker<'a> {
                     Self::unify(ast, &v1, &v2, depth + 1, turbine)
                 }
             }
-            (Value::Pi(q1, d1, c1), Value::Pi(q2, d2, c2)) => {
+            (Value::Pi(_, q1, d1, c1), Value::Pi(_, q2, d2, c2)) => {
                 q1 == q2 && Self::unify(ast, &d1, &d2, depth, turbine) && {
                     let var = Value::Neutral(crate::eval::Neutral::Var(Level(depth)));
                     let v1 = c1.instantiate(ast, var.clone(), Some(turbine));
@@ -228,8 +224,8 @@ impl<'a> Checker<'a> {
             return Err(Error::SharedExpression(expr));
         }
 
-        if let Expr::Lambda { quantity, body } = term {
-            if let Value::Pi(decl_q, dom, cod_closure) = expected {
+        if let Expr::Lambda { plicity, quantity, body } = term {
+            if let Value::Pi(plic, decl_q, dom, cod_closure) = expected {
                 if quantity != decl_q {
                     return Err(Error::QuantityMismatch {
                         expr,
@@ -266,7 +262,7 @@ impl<'a> Checker<'a> {
                     body_elab.usages.truncate(depth);
                 }
 
-                let out_ty = Value::Pi(decl_q, dom, cod_closure);
+                let out_ty = Value::Pi(plic, decl_q, dom, cod_closure);
                 if let Some(turbine) = self.turbine {
                     let snap =
                         crate::turbine::AtomicElabSnapshot::from_value(&out_ty, Quantity::Zero);
@@ -543,6 +539,7 @@ impl<'a> Checker<'a> {
                 })
             }
             Expr::Pi {
+                plicity: _,
                 quantity: _,
                 domain,
                 codomain,
@@ -596,9 +593,36 @@ impl<'a> Checker<'a> {
                 let elab = self.check(term, ty_val.clone(), depth, env, types)?;
                 Ok(elab)
             }
-            Expr::App { function, argument } => {
+            Expr::App { plicity, function, argument } => {
                 let mut f_elab = self.synth(function, depth, env, types)?;
-                if let Value::Pi(decl_q, dom, cod) = f_elab.ty {
+                
+                let mut implicits_to_insert = Vec::new();
+                while let Value::Pi(plic, _decl_q, _dom, cod) = f_elab.ty.clone() {
+                    if plic == crate::ast::Plicity::Implicit && plicity == crate::ast::Plicity::Explicit {
+                        if let Some(turbine) = self.turbine {
+                            let meta_val_id = turbine.new_meta();
+                            let meta_val = Value::Meta(meta_val_id, env.to_vec());
+                            f_elab.ty = cod.instantiate(self.ast, meta_val, self.turbine);
+                            implicits_to_insert.push(meta_val_id);
+                        } else {
+                            return Err(Error::TypeMismatch {
+                                expr: function,
+                                expected: "Explicit function".to_string(),
+                                found: "Implicit function without Turbine".to_string(),
+                            });
+                        }
+                    } else {
+                        break;
+                    }
+                }
+
+                if !implicits_to_insert.is_empty() {
+                    if let Some(turbine) = self.turbine {
+                        turbine.inserted_implicits.write().unwrap().insert(expr, implicits_to_insert);
+                    }
+                }
+
+                if let Value::Pi(plic, decl_q, dom, cod) = f_elab.ty {
                     let mut arg_elab = self.check(argument, *dom, depth, env, types)?;
 
                     // Multiply argument usages by the Pi declared quantity

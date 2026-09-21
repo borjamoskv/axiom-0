@@ -42,7 +42,7 @@ fn main() {
                 // Identidad lineal: fn :^1 x -> x
                 let var0 = ast.push(Expr::Var(Level(0))).unwrap();
                 let lam = ast
-                    .push(Expr::Lambda {
+                    .push(Expr::Lambda { plicity: micro_axiom_0::ast::Plicity::Explicit,
                         quantity: Quantity::One,
                         body: var0,
                     })
@@ -54,7 +54,7 @@ fn main() {
                 let u_dom = ast.push(Expr::Universe(0)).unwrap();
                 let u_cod = ast.push(Expr::Universe(0)).unwrap();
                 let pi = ast
-                    .push(Expr::Pi {
+                    .push(Expr::Pi { plicity: micro_axiom_0::ast::Plicity::Explicit,
                         quantity: Quantity::One,
                         domain: u_dom,
                         codomain: u_cod,

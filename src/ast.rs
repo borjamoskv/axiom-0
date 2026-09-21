@@ -108,7 +108,13 @@ pub struct Level(pub usize);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct MetaId(pub usize);
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Plicity {
+    Explicit,
+    Implicit,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Var(Level),
     Universe(u32),
@@ -136,15 +142,18 @@ pub enum Expr {
     Fst(ExprId),
     Snd(ExprId),
     Pi {
+        plicity: Plicity,
         quantity: Quantity,
         domain: ExprId,
         codomain: ExprId,
     },
     Lambda {
+        plicity: Plicity,
         quantity: Quantity,
         body: ExprId,
     },
     App {
+        plicity: Plicity,
         function: ExprId,
         argument: ExprId,
     },
@@ -229,7 +238,7 @@ impl Ast {
             Expr::Lambda { body, .. } | Expr::Fst(body) | Expr::Snd(body) => {
                 self.expr(body)?;
             }
-            Expr::App { function, argument } | Expr::Pair { first: function, second: argument } => {
+            Expr::App { plicity: _, function, argument } | Expr::Pair { first: function, second: argument } => {
                 self.expr(function)?;
                 self.expr(argument)?;
             }
@@ -258,7 +267,7 @@ impl Ast {
     }
 
     pub fn expr(&self, id: ExprId) -> Result<Expr, AstError> {
-        self.node(id).map(|node| node.expression)
+        self.node(id).map(|node| node.expression.clone())
     }
 
     pub fn span(&self, id: ExprId) -> Result<Option<Span>, AstError> {
