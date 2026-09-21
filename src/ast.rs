@@ -45,6 +45,7 @@ impl fmt::Display for Quantity {
 static NEXT_ARENA: AtomicUsize = AtomicUsize::new(0);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Hash)]
 pub(crate) struct ArenaId(usize);
 
 impl ArenaId {
@@ -61,7 +62,7 @@ impl ArenaId {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct ExprId {
     pub(crate) arena: ArenaId,
     pub(crate) index: usize,
@@ -104,12 +105,36 @@ impl Span {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Level(pub usize);
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct MetaId(pub usize);
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Expr {
     Var(Level),
     Universe(u32),
     UnitType,
     Unit,
+    Bool,
+    True,
+    False,
+    Hole,
+    Meta(MetaId),
+    If {
+        cond: ExprId,
+        conseq: ExprId,
+        alt: ExprId,
+    },
+    Sigma {
+        quantity: Quantity,
+        domain: ExprId,
+        codomain: ExprId,
+    },
+    Pair {
+        first: ExprId,
+        second: ExprId,
+    },
+    Fst(ExprId),
+    Snd(ExprId),
     Pi {
         quantity: Quantity,
         domain: ExprId,
@@ -197,24 +222,27 @@ impl Ast {
 
     fn push_spanned(&mut self, expression: Expr, span: Option<Span>) -> Result<ExprId, AstError> {
         match expression {
-            Expr::Pi {
-                domain, codomain, ..
-            } => {
+            Expr::Pi { domain, codomain, .. } | Expr::Sigma { domain, codomain, .. } => {
                 self.expr(domain)?;
                 self.expr(codomain)?;
             }
-            Expr::Lambda { body, .. } => {
+            Expr::Lambda { body, .. } | Expr::Fst(body) | Expr::Snd(body) => {
                 self.expr(body)?;
             }
-            Expr::App { function, argument } => {
+            Expr::App { function, argument } | Expr::Pair { first: function, second: argument } => {
                 self.expr(function)?;
                 self.expr(argument)?;
+            }
+            Expr::If { cond, conseq, alt } => {
+                self.expr(cond)?;
+                self.expr(conseq)?;
+                self.expr(alt)?;
             }
             Expr::Ann { term, ty } => {
                 self.expr(term)?;
                 self.expr(ty)?;
             }
-            Expr::Var(_) | Expr::Universe(_) | Expr::UnitType | Expr::Unit => {}
+            Expr::Var(_) | Expr::Universe(_) | Expr::UnitType | Expr::Unit | Expr::Bool | Expr::True | Expr::False | Expr::Hole | Expr::Meta(_) => {}
         }
         if let Some(span) = span {
             if span.start > span.end {

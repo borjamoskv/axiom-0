@@ -136,7 +136,7 @@ fn test_turbine_parallel_batch_checking() {
             codomain: u0_cod,
         })
         .unwrap();
-    let expected_val = micro_axiom_0::eval::eval(&ast, pi_ty, &[]);
+    let expected_val = micro_axiom_0::eval::eval(&ast, pi_ty, &[], None);
 
     let turbine = TurbineEngine::for_ast(&ast);
     let results = turbine.check_batch_parallel(&ast, &roots, expected_val, &[]);

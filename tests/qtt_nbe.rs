@@ -26,7 +26,7 @@ fn test_nbe_beta_reduction() {
         })
         .unwrap();
 
-    let res = eval(&ast, app, &[]);
+    let res = eval(&ast, app, &[], None);
     assert_eq!(res, Value::Unit);
 }
 
@@ -52,7 +52,7 @@ fn test_nbe_eta_equality() {
         })
         .unwrap();
 
-    let lam_val = eval(&ast, lam, std::slice::from_ref(&f_val));
+    let lam_val = eval(&ast, lam, std::slice::from_ref(&f_val), None);
 
     // By eta-equality: (\x. f x) == f
     assert!(equiv(&ast, &lam_val, &f_val, 1));
@@ -115,7 +115,7 @@ fn test_qtt_linear_variable_unused_fails() {
             codomain: u1_cod,
         })
         .unwrap();
-    let expected = eval(&ast, pi_ty, &[]);
+    let expected = eval(&ast, pi_ty, &[], None);
 
     // Term: fn :^1 x -> type 0 (x is dropped / unused; type 0 has type type 1)
     let body = ast.push(Expr::Universe(0)).unwrap();
@@ -150,7 +150,7 @@ fn test_qtt_erased_variable_used_fails() {
             codomain: u0_cod,
         })
         .unwrap();
-    let expected = eval(&ast, pi_ty, &[]);
+    let expected = eval(&ast, pi_ty, &[], None);
 
     // Term: fn :^0 x -> x (x is used, violating erased quantity 0; x has type type 0)
     let var0 = ast.push(Expr::Var(Level(0))).unwrap();
@@ -185,7 +185,7 @@ fn test_qtt_valid_linear_and_erased() {
             codomain: u0_cod,
         })
         .unwrap();
-    let exp_linear = eval(&ast, pi_linear, &[]);
+    let exp_linear = eval(&ast, pi_linear, &[], None);
 
     let var0 = ast.push(Expr::Var(Level(0))).unwrap();
     let lam_linear = ast
@@ -207,7 +207,7 @@ fn test_qtt_valid_linear_and_erased() {
             codomain: u1_cod2,
         })
         .unwrap();
-    let exp_erased = eval(&ast, pi_erased, &[]);
+    let exp_erased = eval(&ast, pi_erased, &[], None);
 
     let u0_body = ast.push(Expr::Universe(0)).unwrap();
     let lam_erased = ast
@@ -237,7 +237,7 @@ fn test_parser_and_repl_commands() {
             let elab_ty = synthesize(&ast, ty_expr, &[]).expect("synthesize type");
             assert_eq!(elab_ty.ty, Value::Universe(1));
 
-            let exp_val = eval(&ast, ty_expr, &[]);
+            let exp_val = eval(&ast, ty_expr, &[], None);
             let elab_term = check(&ast, term, exp_val, &[]).expect("check term");
             assert!(elab_term.usages.is_empty());
         }

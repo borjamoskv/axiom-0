@@ -235,6 +235,8 @@ impl std::error::Error for TurbineWriteError {
 // Arena allocation stops before issuing usize::MAX, so it cannot be a valid ID.
 const UNBOUND_ARENA: usize = usize::MAX;
 
+use std::sync::RwLock;
+
 /// Parallel elaboration and atomic telemetry for exactly one AST arena.
 ///
 /// Houses a fixed-size vector of [`SeqlockCell<usize, 4>`]. Slot indices are valid
@@ -243,6 +245,8 @@ const UNBOUND_ARENA: usize = usize::MAX;
 pub struct TurbineEngine {
     arena: AtomicUsize,
     slots: Vec<SeqlockCell<usize, 4>>,
+    meta_ctx: RwLock<Vec<Option<Value>>>,
+    pub expr_to_meta: RwLock<std::collections::HashMap<crate::ast::ExprId, crate::ast::MetaId>>,
 }
 
 impl TurbineEngine {
@@ -259,6 +263,8 @@ impl TurbineEngine {
         Self {
             arena: AtomicUsize::new(UNBOUND_ARENA),
             slots,
+            meta_ctx: RwLock::new(Vec::new()),
+            expr_to_meta: RwLock::new(std::collections::HashMap::new()),
         }
     }
 
@@ -269,6 +275,45 @@ impl TurbineEngine {
         let mut engine = Self::new(ast.expression_count());
         *engine.arena.get_mut() = ast.arena_id().raw();
         engine
+    }
+
+    /// Instantiates a new metavariable.
+    pub fn new_meta(&self) -> crate::ast::MetaId {
+        let mut ctx = self.meta_ctx.write().unwrap();
+        let id = ctx.len();
+        ctx.push(None);
+        crate::ast::MetaId(id)
+    }
+
+    /// Resolves a metavariable with a value.
+    pub fn solve_meta(&self, meta: crate::ast::MetaId, value: Value) {
+        let mut ctx = self.meta_ctx.write().unwrap();
+        if ctx[meta.0].is_none() {
+            ctx[meta.0] = Some(value);
+        }
+    }
+
+    /// Forces a value, substituting solved metavariables recursively at the head.
+    pub fn force(&self, ast: &Ast, val: Value) -> Value {
+        match val {
+            Value::Meta(id, spine) => {
+                let solution = self.meta_ctx.read().unwrap()[id.0].clone();
+                if let Some(mut sol) = solution {
+                    // Apply spine to the solution
+                    for arg in spine {
+                        sol = match sol {
+                            Value::Lam(_, closure) => closure.instantiate(ast, arg, Some(self)),
+                            Value::Neutral(neu) => Value::Neutral(crate::eval::Neutral::App(Box::new(neu), Box::new(arg))),
+                            _ => panic!("Cannot apply spine to non-lambda in force"),
+                        }
+                    }
+                    self.force(ast, sol)
+                } else {
+                    Value::Meta(id, spine)
+                }
+            }
+            _ => val,
+        }
     }
 
     /// Number of atomic slots in the turbine.

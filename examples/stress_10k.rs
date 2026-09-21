@@ -139,7 +139,7 @@ fn main() {
             })
             .unwrap();
 
-        let val = eval(&ast, app, &[]);
+        let val = eval(&ast, app, &[], None);
         assert!(matches!(val, Value::Unit));
 
         let is_equiv = equiv(&ast, &val, &Value::Unit, 0);

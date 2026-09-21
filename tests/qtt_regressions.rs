@@ -33,7 +33,7 @@ fn closure_consumer(ast: &mut Ast, quantity: Quantity) -> Value {
     let domain = unit_function(ast, Quantity::Zero);
     let codomain = ast.push(Expr::UnitType).unwrap();
     let function = pi(ast, quantity, domain, codomain);
-    eval(ast, function, &[])
+    eval(ast, function, &[], None)
 }
 
 fn two_closure_consumer(ast: &mut Ast, parameter_quantity: Quantity) -> Value {
@@ -42,7 +42,7 @@ fn two_closure_consumer(ast: &mut Ast, parameter_quantity: Quantity) -> Value {
     let result = ast.push(Expr::UnitType).unwrap();
     let tail = pi(ast, Quantity::One, second, result);
     let function = pi(ast, Quantity::One, first, tail);
-    eval(ast, function, &[])
+    eval(ast, function, &[], None)
 }
 
 #[test]
@@ -68,7 +68,7 @@ fn unrestricted_argument_cannot_capture_a_linear_outer_binder() {
     let mut ast = Ast::new();
     let consumer_type = closure_consumer(&mut ast, Quantity::Omega);
     let expected = unit_function(&mut ast, Quantity::One);
-    let expected = eval(&ast, expected, &[]);
+    let expected = eval(&ast, expected, &[], None);
     let function = var(&mut ast, 0);
     let capture = var(&mut ast, 1);
     let argument = lambda(&mut ast, Quantity::Zero, capture);
@@ -90,7 +90,7 @@ fn erased_argument_can_capture_an_erased_outer_binder() {
     let mut ast = Ast::new();
     let consumer_type = closure_consumer(&mut ast, Quantity::Zero);
     let expected = unit_function(&mut ast, Quantity::Zero);
-    let expected = eval(&ast, expected, &[]);
+    let expected = eval(&ast, expected, &[], None);
     let function = var(&mut ast, 0);
     let capture = var(&mut ast, 1);
     let argument = lambda(&mut ast, Quantity::Zero, capture);
@@ -107,7 +107,7 @@ fn erased_argument_does_not_consume_a_linear_outer_binder() {
     let mut ast = Ast::new();
     let consumer_type = closure_consumer(&mut ast, Quantity::Zero);
     let expected = unit_function(&mut ast, Quantity::One);
-    let expected = eval(&ast, expected, &[]);
+    let expected = eval(&ast, expected, &[], None);
     let function = var(&mut ast, 0);
     let capture = var(&mut ast, 1);
     let argument = lambda(&mut ast, Quantity::Zero, capture);
@@ -129,7 +129,7 @@ fn duplicate_capture_in_sibling_arguments_rejects_a_linear_outer_binder() {
     let mut ast = Ast::new();
     let consumer_type = two_closure_consumer(&mut ast, Quantity::Zero);
     let expected = unit_function(&mut ast, Quantity::One);
-    let expected = eval(&ast, expected, &[]);
+    let expected = eval(&ast, expected, &[], None);
     let function = var(&mut ast, 0);
     let first_capture = var(&mut ast, 1);
     let first = lambda(&mut ast, Quantity::Zero, first_capture);
@@ -194,7 +194,7 @@ fn erasing_an_argument_does_not_hide_a_discarded_linear_binder_inside_it() {
     let domain = unit_function(&mut ast, Quantity::One);
     let codomain = ast.push(Expr::UnitType).unwrap();
     let consumer = pi(&mut ast, Quantity::Zero, domain, codomain);
-    let consumer_type = eval(&ast, consumer, &[]);
+    let consumer_type = eval(&ast, consumer, &[], None);
     let function = var(&mut ast, 0);
     let ignored_body = ast.push(Expr::Unit).unwrap();
     let argument = lambda(&mut ast, Quantity::One, ignored_body);
@@ -220,7 +220,7 @@ fn dependent_annotation_does_not_turn_an_erased_type_binder_into_a_capture() {
     let inner_type = pi(&mut ast, Quantity::One, domain, codomain);
     let outer_type = pi(&mut ast, Quantity::Zero, universe, inner_type);
     synthesize(&ast, outer_type, &[]).unwrap();
-    let expected = eval(&ast, outer_type, &[]);
+    let expected = eval(&ast, outer_type, &[], None);
 
     // fn :^0 A -> fn :^1 x -> (x : A)
     let value = var(&mut ast, 1);

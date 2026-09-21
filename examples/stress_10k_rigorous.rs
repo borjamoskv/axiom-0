@@ -175,7 +175,7 @@ fn main() {
                 check(&ast, app, expected_ty, &[]).expect("check failed");
                 check_success += 1;
 
-                let val = eval(&ast, app, &[]);
+                let val = eval(&ast, app, &[], None);
                 assert!(matches!(val, Value::Unit));
                 total_nodes_allocated += ast.expression_count();
             }

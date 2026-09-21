@@ -16,6 +16,8 @@ pub enum TokenKind {
     Let,
     Loop,
     If,
+    Else,
+    Sigma,
     Continue,
     Return,
     Session,
@@ -52,6 +54,7 @@ pub enum TokenKind {
     NotEq,     // !=
     Percent,   // %
     Plus,      // +
+    Asterisk,  // *
     Bang,      // !
     Question,  // ?
 }
@@ -252,6 +255,7 @@ impl<'a> Lexer<'a> {
             '@' => Some(TokenKind::At),
             '%' => Some(TokenKind::Percent),
             '+' => Some(TokenKind::Plus),
+            '*' => Some(TokenKind::Asterisk),
             '!' => Some(TokenKind::Bang),
             '?' => Some(TokenKind::Question),
             _ => None,
@@ -324,6 +328,8 @@ impl<'a> Lexer<'a> {
                 "let" => TokenKind::Let,
                 "loop" => TokenKind::Loop,
                 "if" => TokenKind::If,
+                "else" => TokenKind::Else,
+                "sigma" => TokenKind::Sigma,
                 "continue" => TokenKind::Continue,
                 "return" => TokenKind::Return,
                 "session" => TokenKind::Session,

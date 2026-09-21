@@ -54,7 +54,7 @@ pub fn run_repl<R: BufRead, W: Write>(mut reader: R, mut writer: W) -> io::Resul
             Ok(Command::Eval(expr_id)) => {
                 match synthesize_in_env(&ast, expr_id, &global_env, &global_types) {
                     Ok(elaboration) => {
-                        let value = eval(&ast, expr_id, &global_env);
+                        let value = eval(&ast, expr_id, &global_env, None);
                         writeln!(writer, "==> Val: {value:?}")?;
                         writeln!(writer, "    Typ: {:?}", elaboration.ty)?;
                     }
@@ -79,7 +79,7 @@ pub fn run_repl<R: BufRead, W: Write>(mut reader: R, mut writer: W) -> io::Resul
                             continue;
                         }
                     }
-                    let expected = eval(&ast, annotation, &global_env);
+                    let expected = eval(&ast, annotation, &global_env, None);
                     match check_in_env(&ast, term, expected.clone(), &global_env, &global_types) {
                         Ok(_) => expected,
                         Err(error) => {
@@ -97,7 +97,7 @@ pub fn run_repl<R: BufRead, W: Write>(mut reader: R, mut writer: W) -> io::Resul
                     }
                 };
 
-                let value = eval(&ast, term, &global_env);
+                let value = eval(&ast, term, &global_env, None);
                 writeln!(writer, "{name} definido.")?;
                 writeln!(writer, "==> Val: {value:?}")?;
                 writeln!(writer, "    Typ: {term_ty:?}")?;

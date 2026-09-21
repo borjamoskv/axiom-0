@@ -44,7 +44,7 @@ fn global_unit_alias_supports_an_annotated_identity_and_application() {
     let env = [Value::UnitType];
     let types = [Value::Universe(0)];
 
-    let checked = check_in_env(&ast, lambda, eval(&ast, identity_ty, &env), &env, &types)
+    let checked = check_in_env(&ast, lambda, eval(&ast, identity_ty, &env, None), &env, &types)
         .expect("the identity body resolves its global type alias");
     assert_eq!(checked.usages, vec![Quantity::Zero]);
 
@@ -52,7 +52,7 @@ fn global_unit_alias_supports_an_annotated_identity_and_application() {
         .expect("the identity accepts a value of the aliased type");
     assert_eq!(result.ty, Value::UnitType);
     assert_eq!(result.usages, vec![Quantity::Zero]);
-    assert_eq!(eval(&ast, application, &env), Value::Unit);
+    assert_eq!(eval(&ast, application, &env, None), Value::Unit);
 }
 
 #[test]
@@ -121,7 +121,7 @@ fn neutral_contexts_keep_global_slots_before_dependent_lambda_binders() {
         Value::Neutral(Neutral::Var(Level(0))),
         Value::Neutral(Neutral::Var(Level(1))),
     ];
-    let expected = eval(&ast, outer_pi, &neutral_env);
+    let expected = eval(&ast, outer_pi, &neutral_env, None);
 
     let checked = check(&ast, outer_lambda, expected.clone(), &types)
         .expect("nested binders must retain their original De Bruijn levels");
@@ -147,7 +147,7 @@ fn neutral_wrappers_preserve_an_abstract_alias_instead_of_unfolding_it() {
     let types = [Value::Universe(0)];
     let neutral_alias = Value::Neutral(Neutral::Var(Level(0)));
     let neutral_env = [neutral_alias.clone()];
-    let abstract_ty = eval(&ast, ty, &neutral_env);
+    let abstract_ty = eval(&ast, ty, &neutral_env, None);
 
     let synthesized = synthesize(&ast, identity, &types).expect("identity at abstract A");
     assert!(equiv(&ast, &synthesized.ty, &abstract_ty, 1));
@@ -155,7 +155,7 @@ fn neutral_wrappers_preserve_an_abstract_alias_instead_of_unfolding_it() {
         Value::Pi(_, domain, codomain) => {
             assert_eq!(domain.as_ref(), &neutral_alias);
             assert_eq!(
-                codomain.clone().instantiate(&ast, Value::Unit),
+                codomain.clone().instantiate(&ast, Value::Unit, None),
                 neutral_alias
             );
         }

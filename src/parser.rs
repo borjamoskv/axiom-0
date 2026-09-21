@@ -173,12 +173,32 @@ impl<'a> Parser<'a> {
         let mut expr = self.parse_atom()?;
         while let Some(tok) = self.peek() {
             match tok.kind {
-                TokenKind::Ident | TokenKind::LParen | TokenKind::Fn | TokenKind::Type => {
+                TokenKind::Ident | TokenKind::LParen | TokenKind::Fn | TokenKind::Type | TokenKind::Sigma | TokenKind::If | TokenKind::Question => {
                     let argument = self.parse_atom()?;
                     expr = self.ast.push(Expr::App {
                         function: expr,
                         argument,
                     })?;
+                }
+                TokenKind::Dot => {
+                    self.advance(); // consume Dot
+                    if let Some(field) = self.peek() {
+                        if let TokenKind::NatLiteral(1) = field.kind {
+                            self.advance();
+                            expr = self.ast.push(Expr::Fst(expr))?;
+                        } else if let TokenKind::NatLiteral(2) = field.kind {
+                            self.advance();
+                            expr = self.ast.push(Expr::Snd(expr))?;
+                        } else {
+                            return Err(ParseError::UnexpectedToken {
+                                expected: "1 or 2",
+                                found: Some(field.kind),
+                                span: Some(convert_span(field.span)),
+                            });
+                        }
+                    } else {
+                        return Err(ParseError::UnexpectedEof);
+                    }
                 }
                 TokenKind::Arrow => {
                     self.advance();
@@ -228,6 +248,11 @@ impl<'a> Parser<'a> {
                     .unwrap_or(start_span);
                 let span = AstSpan::new(start_span.start, end_span.end).unwrap();
                 Ok(self.ast.push_spanned_exact(Expr::Universe(level), span)?)
+            }
+            TokenKind::Question => {
+                let span = tok.span;
+                self.advance();
+                Ok(self.ast.push_spanned_exact(Expr::Hole, convert_span(span))?)
             }
             TokenKind::Fn => {
                 let start_span = tok.span;
@@ -299,6 +324,72 @@ impl<'a> Parser<'a> {
                         .push_spanned_exact(Expr::Lambda { quantity, body }, span)?)
                 }
             }
+            TokenKind::Sigma => {
+                let start_span = tok.span;
+                self.advance();
+                let mut quantity = Quantity::Omega;
+                if let Some(qtok) = self.peek() {
+                    match qtok.kind {
+                        TokenKind::QuantZero => {
+                            quantity = Quantity::Zero;
+                            self.advance();
+                        }
+                        TokenKind::QuantOne => {
+                            quantity = Quantity::One;
+                            self.advance();
+                        }
+                        TokenKind::QuantOmega => {
+                            quantity = Quantity::Omega;
+                            self.advance();
+                        }
+                        _ => {}
+                    }
+                }
+                self.expect(TokenKind::LParen, "'('")?;
+                let param_tok = self.expect(TokenKind::Ident, "identifier")?;
+                let param_name = param_tok.text;
+                self.expect(TokenKind::Colon, "':'")?;
+                let domain = self.parse_expression()?;
+                self.expect(TokenKind::RParen, "')'")?;
+
+                self.expect(TokenKind::Asterisk, "'*'")?;
+                let codomain = self.parse_under_binder(param_name)?;
+
+                let end_span = self
+                    .tokens
+                    .get(self.cursor.saturating_sub(1))
+                    .map(|t| t.span)
+                    .unwrap_or(start_span);
+                let span = AstSpan::new(start_span.start, end_span.end).unwrap();
+                Ok(self.ast.push_spanned_exact(
+                    Expr::Sigma {
+                        quantity,
+                        domain,
+                        codomain,
+                    },
+                    span,
+                )?)
+            }
+            TokenKind::If => {
+                let start_span = tok.span;
+                self.advance();
+                let cond = self.parse_expression()?;
+                self.expect(TokenKind::LBrace, "'{'")?;
+                let conseq = self.parse_expression()?;
+                self.expect(TokenKind::RBrace, "'}'")?;
+                self.expect(TokenKind::Else, "'else'")?;
+                self.expect(TokenKind::LBrace, "'{'")?;
+                let alt = self.parse_expression()?;
+                self.expect(TokenKind::RBrace, "'}'")?;
+
+                let end_span = self
+                    .tokens
+                    .get(self.cursor.saturating_sub(1))
+                    .map(|t| t.span)
+                    .unwrap_or(start_span);
+                let span = AstSpan::new(start_span.start, end_span.end).unwrap();
+                Ok(self.ast.push_spanned_exact(Expr::If { cond, conseq, alt }, span)?)
+            }
             TokenKind::Ident => {
                 let name = tok.text;
                 let span = convert_span(tok.span);
@@ -307,6 +398,12 @@ impl<'a> Parser<'a> {
                     Expr::Var(Level(level))
                 } else if name == "UnitType" {
                     Expr::UnitType
+                } else if name == "Bool" {
+                    Expr::Bool
+                } else if name == "True" {
+                    Expr::True
+                } else if name == "False" {
+                    Expr::False
                 } else {
                     return Err(ParseError::UnknownVariable {
                         name: name.to_string(),
@@ -326,7 +423,14 @@ impl<'a> Parser<'a> {
                         return Ok(self.ast.push_spanned_exact(Expr::Unit, span)?);
                     }
                 }
-                let expr = self.parse_expression()?;
+                let mut expr = self.parse_expression()?;
+                if let Some(comma) = self.peek() {
+                    if comma.kind == TokenKind::Comma {
+                        self.advance();
+                        let second = self.parse_expression()?;
+                        expr = self.ast.push(Expr::Pair { first: expr, second })?;
+                    }
+                }
                 self.expect(TokenKind::RParen, "')'")?;
                 Ok(expr)
             }

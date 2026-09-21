@@ -353,7 +353,7 @@ fn main() {
                 })
                 .unwrap();
 
-            let expected_ty_val = eval(&ast, outer_pi, &[]);
+            let expected_ty_val = eval(&ast, outer_pi, &[], None);
             let elab = check(&ast, outer_lam, expected_ty_val, &[])
                 .expect("check multi-linear lambda failed");
             assert!(elab.usages.is_empty());
@@ -396,7 +396,7 @@ fn main() {
                 })
                 .unwrap();
 
-            let reduced = eval(&ast, app2, &[]);
+            let reduced = eval(&ast, app2, &[], None);
             assert!(matches!(reduced, Value::Unit));
 
             qtt_multilinear_verified += 1;
@@ -482,7 +482,7 @@ fn main() {
                     .unwrap();
             }
 
-            let expected_ty_val = eval(&ast, current_pi, &[]);
+            let expected_ty_val = eval(&ast, current_pi, &[], None);
             let elab =
                 check(&ast, current_lam, expected_ty_val, &[]).expect("check deep lambda failed");
             assert!(elab.usages.is_empty());
