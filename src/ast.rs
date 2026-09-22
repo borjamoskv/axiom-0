@@ -124,6 +124,26 @@ pub enum Expr {
     True,
     False,
     Hole,
+    NatType,
+    Zero,
+    Succ(ExprId),
+    Ind {
+        mot: ExprId,
+        z: ExprId,
+        s: ExprId,
+        target: ExprId,
+    },
+    IdType {
+        ty: ExprId,
+        lhs: ExprId,
+        rhs: ExprId,
+    },
+    Refl(ExprId),
+    J {
+        mot: ExprId,
+        base: ExprId,
+        target: ExprId,
+    },
     Meta(MetaId),
     If {
         cond: ExprId,
@@ -251,7 +271,29 @@ impl Ast {
                 self.expr(term)?;
                 self.expr(ty)?;
             }
-            Expr::Var(_) | Expr::Universe(_) | Expr::UnitType | Expr::Unit | Expr::Bool | Expr::True | Expr::False | Expr::Hole | Expr::Meta(_) => {}
+            Expr::Succ(n) => {
+                self.expr(n)?;
+            }
+            Expr::Ind { mot, z, s, target } => {
+                self.expr(mot)?;
+                self.expr(z)?;
+                self.expr(s)?;
+                self.expr(target)?;
+            }
+            Expr::IdType { ty, lhs, rhs } => {
+                self.expr(ty)?;
+                self.expr(lhs)?;
+                self.expr(rhs)?;
+            }
+            Expr::Refl(x) => {
+                self.expr(x)?;
+            }
+            Expr::J { mot, base, target } => {
+                self.expr(mot)?;
+                self.expr(base)?;
+                self.expr(target)?;
+            }
+            Expr::Var(_) | Expr::Universe(_) | Expr::UnitType | Expr::Unit | Expr::Bool | Expr::True | Expr::False | Expr::Hole | Expr::Meta(_) | Expr::NatType | Expr::Zero => {}
         }
         if let Some(span) = span {
             if span.start > span.end {

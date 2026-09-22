@@ -186,6 +186,12 @@ impl<'a> Checker<'a> {
             (Value::NatType, Value::NatType) => true,
             (Value::Zero, Value::Zero) => true,
             (Value::Succ(n1), Value::Succ(n2)) => Self::unify(ast, &n1, &n2, depth, turbine),
+            (Value::IdType(t1, l1, r1), Value::IdType(t2, l2, r2)) => {
+                Self::unify(ast, &t1, &t2, depth, turbine)
+                    && Self::unify(ast, &l1, &l2, depth, turbine)
+                    && Self::unify(ast, &r1, &r2, depth, turbine)
+            }
+            (Value::Refl(x1), Value::Refl(x2)) => Self::unify(ast, &x1, &x2, depth, turbine),
             (Value::Bool, Value::Bool) => true,
             (Value::True, Value::True) => true,
             (Value::False, Value::False) => true,
@@ -322,6 +328,47 @@ impl<'a> Checker<'a> {
                     let _ = turbine.publish(expr, snap);
                 }
                 return Ok(Elaboration { ty: Value::Bool, usages: vec![] });
+            }
+        }
+
+        if let Expr::Refl(x) = term {
+            if let Value::IdType(ref ty_a, ref lhs, ref rhs) = expected {
+                let x_elab = self.check(x, (**ty_a).clone(), depth, env, types)?;
+                let x_val = eval(self.ast, x, env, self.turbine);
+                
+                let unified_lhs = if let Some(t) = self.turbine {
+                    Self::unify(self.ast, &x_val, lhs, depth, t)
+                } else {
+                    crate::eval::equiv(self.ast, &x_val, lhs, depth)
+                };
+                let unified_rhs = if let Some(t) = self.turbine {
+                    Self::unify(self.ast, &x_val, rhs, depth, t)
+                } else {
+                    crate::eval::equiv(self.ast, &x_val, rhs, depth)
+                };
+
+                if !unified_lhs || !unified_rhs {
+                    return Err(Error::TypeMismatch {
+                        expr,
+                        expected: format!("Id({:?}, {:?}, {:?})", ty_a, lhs, rhs),
+                        found: format!("refl({:?})", x_val),
+                    });
+                }
+
+                if let Some(turbine) = self.turbine {
+                    let snap = crate::turbine::AtomicElabSnapshot::from_value(&expected, Quantity::Zero);
+                    let _ = turbine.publish(expr, snap);
+                }
+                return Ok(Elaboration {
+                    ty: expected,
+                    usages: x_elab.usages,
+                });
+            } else {
+                return Err(Error::TypeMismatch {
+                    expr,
+                    expected: "IdType".into(),
+                    found: format!("{:?}", expected),
+                });
             }
         }
 
@@ -746,6 +793,98 @@ impl<'a> Checker<'a> {
                 
                 let ret_ty = crate::eval::apply(self.ast, crate::ast::Plicity::Explicit, mot_val, target_val, self.turbine);
                 Ok(Elaboration { ty: ret_ty, usages: vec![] })
+            }
+            Expr::IdType { ty, lhs, rhs } => {
+                let ty_elab = self.synth(ty, depth, env, types)?;
+                let u_level = match ty_elab.ty {
+                    Value::Universe(u) => u,
+                    _ => return Err(Error::TypeMismatch {
+                        expr: ty,
+                        expected: "Universe".into(),
+                        found: format!("{:?}", ty_elab.ty),
+                    }),
+                };
+                let ty_val = eval(self.ast, ty, env, self.turbine);
+                let lhs_elab = self.check(lhs, ty_val.clone(), depth, env, types)?;
+                let rhs_elab = self.check(rhs, ty_val, depth, env, types)?;
+
+                let max_len = ty_elab.usages.len().max(lhs_elab.usages.len()).max(rhs_elab.usages.len());
+                let mut usages = ty_elab.usages;
+                usages.resize(max_len, Quantity::Zero);
+                for (i, u) in lhs_elab.usages.into_iter().enumerate() {
+                    usages[i] = usages[i].plus(u);
+                }
+                for (i, u) in rhs_elab.usages.into_iter().enumerate() {
+                    usages[i] = usages[i].plus(u);
+                }
+                Ok(Elaboration {
+                    ty: Value::Universe(u_level),
+                    usages,
+                })
+            }
+            Expr::Refl(x) => {
+                let x_elab = self.synth(x, depth, env, types)?;
+                let x_val = eval(self.ast, x, env, self.turbine);
+                let ty = Value::IdType(Box::new(x_elab.ty), Box::new(x_val.clone()), Box::new(x_val));
+                Ok(Elaboration {
+                    ty,
+                    usages: x_elab.usages,
+                })
+            }
+            Expr::J { mot, base, target } => {
+                let target_elab = self.synth(target, depth, env, types)?;
+                let (ty_a, lhs, rhs) = match target_elab.ty {
+                    Value::IdType(ty_a, lhs, rhs) => (*ty_a, *lhs, *rhs),
+                    _ => return Err(Error::TypeMismatch {
+                        expr: target,
+                        expected: "IdType".into(),
+                        found: format!("{:?}", target_elab.ty),
+                    }),
+                };
+                let target_val = eval(self.ast, target, env, self.turbine);
+                let mot_val = eval(self.ast, mot, env, self.turbine);
+
+                let mot_term = self.ast.expr(mot)?;
+                if let Expr::Lambda { body: mot_body1, .. } = mot_term {
+                    let mut env1 = env.to_vec();
+                    let mut types1 = types.to_vec();
+                    types1.push(ty_a.clone());
+                    let var_x = Value::Neutral(crate::eval::Neutral::Var(crate::ast::Level(depth)));
+                    env1.push(var_x.clone());
+
+                    let mot_body1_term = self.ast.expr(mot_body1)?;
+                    if let Expr::Lambda { body: mot_body2, .. } = mot_body1_term {
+                        let mut env2 = env1.clone();
+                        let mut types2 = types1.clone();
+                        let id_ty = Value::IdType(Box::new(ty_a.clone()), Box::new(lhs.clone()), Box::new(var_x));
+                        types2.push(id_ty);
+                        let var_p = Value::Neutral(crate::eval::Neutral::Var(crate::ast::Level(depth + 1)));
+                        env2.push(var_p);
+
+                        let mot_body_elab = self.synth(mot_body2, depth + 2, &env2, &types2)?;
+                        match mot_body_elab.ty {
+                            Value::Universe(_) => {}
+                            _ => panic!("MOT BODY MUST BE A TYPE"),
+                        }
+                    }
+                }
+
+                let refl_lhs = Value::Refl(Box::new(lhs.clone()));
+                let step1 = crate::eval::apply(self.ast, crate::ast::Plicity::Explicit, mot_val.clone(), lhs, self.turbine);
+                let expected_base_ty = crate::eval::apply(self.ast, crate::ast::Plicity::Explicit, step1, refl_lhs, self.turbine);
+                let base_elab = self.check(base, expected_base_ty, depth, env, types)?;
+
+                let step_rhs = crate::eval::apply(self.ast, crate::ast::Plicity::Explicit, mot_val, rhs, self.turbine);
+                let ret_ty = crate::eval::apply(self.ast, crate::ast::Plicity::Explicit, step_rhs, target_val, self.turbine);
+
+                let max_len = target_elab.usages.len().max(base_elab.usages.len());
+                let mut usages = target_elab.usages;
+                usages.resize(max_len, Quantity::Zero);
+                for (i, u) in base_elab.usages.into_iter().enumerate() {
+                    usages[i] = usages[i].plus(u);
+                }
+
+                Ok(Elaboration { ty: ret_ty, usages })
             }
         }
     }

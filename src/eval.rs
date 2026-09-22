@@ -15,6 +15,8 @@ pub enum Value {
     Bool,
     True,
     False,
+    IdType(Box<Value>, Box<Value>, Box<Value>),
+    Refl(Box<Value>),
     Meta(MetaId, Vec<Value>),
     Neutral(Neutral),
 }
@@ -23,6 +25,7 @@ pub enum Value {
 pub enum Neutral {
     Var(Level),
     Ind(Box<Value>, Box<Value>, Box<Value>, Box<Neutral>),
+    J(Box<Value>, Box<Value>, Box<Neutral>),
     App(crate::ast::Plicity, Box<Neutral>, Box<Value>),
     Fst(Box<Neutral>),
     Snd(Box<Neutral>),
@@ -145,6 +148,22 @@ pub fn eval(ast: &Ast, expr: ExprId, env: &[Value], turbine: Option<&crate::turb
             let target_val = eval(ast, target, env, turbine);
             eval_ind(ast, mot_val, z_val, s_val, target_val, turbine)
         }
+        Expr::IdType { ty, lhs, rhs } => {
+            let ty_val = eval(ast, ty, env, turbine);
+            let lhs_val = eval(ast, lhs, env, turbine);
+            let rhs_val = eval(ast, rhs, env, turbine);
+            Value::IdType(Box::new(ty_val), Box::new(lhs_val), Box::new(rhs_val))
+        }
+        Expr::Refl(x) => {
+            let x_val = eval(ast, x, env, turbine);
+            Value::Refl(Box::new(x_val))
+        }
+        Expr::J { mot, base, target } => {
+            let mot_val = eval(ast, mot, env, turbine);
+            let base_val = eval(ast, base, env, turbine);
+            let target_val = eval(ast, target, env, turbine);
+            eval_j(ast, mot_val, base_val, target_val, turbine)
+        }
     }
 }
 
@@ -155,6 +174,10 @@ pub fn equiv(ast: &Ast, a: &Value, b: &Value, depth: usize) -> bool {
         (Value::NatType, Value::NatType) => true,
         (Value::Zero, Value::Zero) => true,
         (Value::Succ(n1), Value::Succ(n2)) => equiv(ast, n1, n2, depth),
+        (Value::IdType(t1, l1, r1), Value::IdType(t2, l2, r2)) => {
+            equiv(ast, t1, t2, depth) && equiv(ast, l1, l2, depth) && equiv(ast, r1, r2, depth)
+        }
+        (Value::Refl(x1), Value::Refl(x2)) => equiv(ast, x1, x2, depth),
         (Value::Universe(l1), Value::Universe(l2)) => l1 == l2,
         (Value::Pi(p1, q1, d1, c1), Value::Pi(p2, q2, d2, c2)) => {
             if p1 != p2 { return false; }
@@ -221,6 +244,11 @@ pub fn equiv_neu(ast: &Ast, n1: &Neutral, n2: &Neutral, depth: usize) -> bool {
                 && equiv(ast, s1, s2, depth)
                 && equiv_neu(ast, t1, t2, depth)
         }
+        (Neutral::J(m1, b1, t1), Neutral::J(m2, b2, t2)) => {
+            equiv(ast, m1, m2, depth)
+                && equiv(ast, b1, b2, depth)
+                && equiv_neu(ast, t1, t2, depth)
+        }
         _ => false,
     }
 }
@@ -247,5 +275,13 @@ fn eval_ind(ast: &Ast, mot: Value, z: Value, s: Value, target: Value, turbine: O
         }
         Value::Neutral(n) => Value::Neutral(Neutral::Ind(Box::new(mot), Box::new(z), Box::new(s), Box::new(n))),
         _ => panic!("Invalid target for ind"),
+    }
+}
+
+fn eval_j(_ast: &Ast, mot: Value, base: Value, target: Value, _turbine: Option<&crate::turbine::TurbineEngine>) -> Value {
+    match target {
+        Value::Refl(_) => base,
+        Value::Neutral(n) => Value::Neutral(Neutral::J(Box::new(mot), Box::new(base), Box::new(n))),
+        _ => panic!("Invalid target for J: must be Refl or Neutral"),
     }
 }

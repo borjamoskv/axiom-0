@@ -173,7 +173,7 @@ impl<'a> Parser<'a> {
         let mut expr = self.parse_atom()?;
         while let Some(tok) = self.peek() {
             match tok.kind {
-                TokenKind::Ident | TokenKind::LParen | TokenKind::Fn | TokenKind::Type | TokenKind::Sigma | TokenKind::If | TokenKind::Question => {
+                TokenKind::Ident | TokenKind::LParen | TokenKind::Fn | TokenKind::Type | TokenKind::Sigma | TokenKind::If | TokenKind::Question | TokenKind::NatType | TokenKind::Zero | TokenKind::Succ | TokenKind::Ind | TokenKind::IdType | TokenKind::Refl | TokenKind::J => {
                     let argument = self.parse_atom()?;
                     expr = self.ast.push(Expr::App { plicity: crate::ast::Plicity::Explicit,
                         function: expr,
@@ -346,6 +346,75 @@ impl<'a> Parser<'a> {
                         .ast
                         .push_spanned_exact(Expr::Lambda { plicity, quantity, body }, span)?)
                 }
+            }
+            TokenKind::NatType => {
+                let span = tok.span;
+                self.advance();
+                Ok(self.ast.push_spanned_exact(Expr::NatType, convert_span(span))?)
+            }
+            TokenKind::Zero => {
+                let span = tok.span;
+                self.advance();
+                Ok(self.ast.push_spanned_exact(Expr::Zero, convert_span(span))?)
+            }
+            TokenKind::Succ => {
+                let start_span = tok.span;
+                self.advance();
+                self.expect(TokenKind::LParen, "'('")?;
+                let n = self.parse_expression()?;
+                self.expect(TokenKind::RParen, "')'")?;
+                let end_span = self.tokens[self.cursor - 1].span;
+                Ok(self.ast.push_spanned_exact(Expr::Succ(n), AstSpan::new(start_span.start, end_span.end).unwrap())?)
+            }
+            TokenKind::Ind => {
+                let start_span = tok.span;
+                self.advance();
+                self.expect(TokenKind::LParen, "'('")?;
+                let mot = self.parse_expression()?;
+                self.expect(TokenKind::Comma, "','")?;
+                let z = self.parse_expression()?;
+                self.expect(TokenKind::Comma, "','")?;
+                let s = self.parse_expression()?;
+                self.expect(TokenKind::Comma, "','")?;
+                let target = self.parse_expression()?;
+                self.expect(TokenKind::RParen, "')'")?;
+                let end_span = self.tokens[self.cursor - 1].span;
+                Ok(self.ast.push_spanned_exact(Expr::Ind { mot, z, s, target }, AstSpan::new(start_span.start, end_span.end).unwrap())?)
+            }
+            TokenKind::IdType => {
+                let start_span = tok.span;
+                self.advance();
+                self.expect(TokenKind::LParen, "'('")?;
+                let ty = self.parse_expression()?;
+                self.expect(TokenKind::Comma, "','")?;
+                let lhs = self.parse_expression()?;
+                self.expect(TokenKind::Comma, "','")?;
+                let rhs = self.parse_expression()?;
+                self.expect(TokenKind::RParen, "')'")?;
+                let end_span = self.tokens[self.cursor - 1].span;
+                Ok(self.ast.push_spanned_exact(Expr::IdType { ty, lhs, rhs }, AstSpan::new(start_span.start, end_span.end).unwrap())?)
+            }
+            TokenKind::Refl => {
+                let start_span = tok.span;
+                self.advance();
+                self.expect(TokenKind::LParen, "'('")?;
+                let x = self.parse_expression()?;
+                self.expect(TokenKind::RParen, "')'")?;
+                let end_span = self.tokens[self.cursor - 1].span;
+                Ok(self.ast.push_spanned_exact(Expr::Refl(x), AstSpan::new(start_span.start, end_span.end).unwrap())?)
+            }
+            TokenKind::J => {
+                let start_span = tok.span;
+                self.advance();
+                self.expect(TokenKind::LParen, "'('")?;
+                let mot = self.parse_expression()?;
+                self.expect(TokenKind::Comma, "','")?;
+                let base = self.parse_expression()?;
+                self.expect(TokenKind::Comma, "','")?;
+                let target = self.parse_expression()?;
+                self.expect(TokenKind::RParen, "')'")?;
+                let end_span = self.tokens[self.cursor - 1].span;
+                Ok(self.ast.push_spanned_exact(Expr::J { mot, base, target }, AstSpan::new(start_span.start, end_span.end).unwrap())?)
             }
             TokenKind::Sigma => {
                 let start_span = tok.span;
