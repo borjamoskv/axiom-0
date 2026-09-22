@@ -3,6 +3,9 @@ use crate::ast::{Ast, Expr, ExprId, Level, Quantity, MetaId};
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Value {
     Unit,
+    NatType,
+    Zero,
+    Succ(Box<Value>),
     UnitType,
     Universe(u32),
     Pi(crate::ast::Plicity, Quantity, Box<Value>, Closure),
@@ -19,6 +22,7 @@ pub enum Value {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Neutral {
     Var(Level),
+    Ind(Box<Value>, Box<Value>, Box<Value>, Box<Neutral>),
     App(crate::ast::Plicity, Box<Neutral>, Box<Value>),
     Fst(Box<Neutral>),
     Snd(Box<Neutral>),
@@ -131,6 +135,16 @@ pub fn eval(ast: &Ast, expr: ExprId, env: &[Value], turbine: Option<&crate::turb
             }
         }
         Expr::Meta(id) => Value::Meta(id, Vec::new()),
+        Expr::NatType => Value::NatType,
+        Expr::Zero => Value::Zero,
+        Expr::Succ(n) => Value::Succ(Box::new(eval(ast, n, env, turbine))),
+        Expr::Ind { mot, z, s, target } => {
+            let mot_val = eval(ast, mot, env, turbine);
+            let z_val = eval(ast, z, env, turbine);
+            let s_val = eval(ast, s, env, turbine);
+            let target_val = eval(ast, target, env, turbine);
+            eval_ind(ast, mot_val, z_val, s_val, target_val, turbine)
+        }
     }
 }
 
@@ -138,6 +152,9 @@ pub fn equiv(ast: &Ast, a: &Value, b: &Value, depth: usize) -> bool {
     match (a, b) {
         (Value::Unit, Value::Unit) => true,
         (Value::UnitType, Value::UnitType) => true,
+        (Value::NatType, Value::NatType) => true,
+        (Value::Zero, Value::Zero) => true,
+        (Value::Succ(n1), Value::Succ(n2)) => equiv(ast, n1, n2, depth),
         (Value::Universe(l1), Value::Universe(l2)) => l1 == l2,
         (Value::Pi(p1, q1, d1, c1), Value::Pi(p2, q2, d2, c2)) => {
             if p1 != p2 { return false; }
@@ -199,5 +216,30 @@ pub fn equiv_neu(ast: &Ast, n1: &Neutral, n2: &Neutral, depth: usize) -> bool {
         (Neutral::Fst(n1), Neutral::Fst(n2)) => equiv_neu(ast, n1, n2, depth),
         (Neutral::Snd(n1), Neutral::Snd(n2)) => equiv_neu(ast, n1, n2, depth),
         _ => false,
+    }
+}
+
+pub fn apply(ast: &Ast, plicity: crate::ast::Plicity, function: Value, argument: Value, turbine: Option<&crate::turbine::TurbineEngine>) -> Value {
+    match function {
+        Value::Lam(_, _, closure) => closure.instantiate(ast, argument, turbine),
+        Value::Neutral(neu) => Value::Neutral(Neutral::App(plicity, Box::new(neu), Box::new(argument))),
+        Value::Meta(id, mut spine) => {
+            spine.push(argument);
+            Value::Meta(id, spine)
+        }
+        _ => panic!("Cannot apply to non-function"),
+    }
+}
+
+fn eval_ind(ast: &Ast, mot: Value, z: Value, s: Value, target: Value, turbine: Option<&crate::turbine::TurbineEngine>) -> Value {
+    match target {
+        Value::Zero => z,
+        Value::Succ(n) => {
+            let ih = eval_ind(ast, mot.clone(), z, s.clone(), *n.clone(), turbine);
+            let step_applied = apply(ast, crate::ast::Plicity::Explicit, s, *n, turbine);
+            apply(ast, crate::ast::Plicity::Explicit, step_applied, ih, turbine)
+        }
+        Value::Neutral(n) => Value::Neutral(Neutral::Ind(Box::new(mot), Box::new(z), Box::new(s), Box::new(n))),
+        _ => panic!("Invalid target for ind"),
     }
 }
