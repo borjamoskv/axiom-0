@@ -10,3 +10,4 @@ pub mod parser;
 pub mod repl;
 pub mod seqlock;
 pub mod turbine;
+pub mod erasure;
