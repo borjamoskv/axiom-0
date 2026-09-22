@@ -24,7 +24,7 @@ fn test_booleans() {
 
 #[test]
 fn test_sigma_pairs() {
-    let src = "let t : sigma (x : Bool) * Bool = (True, False); t.1";
+    let _src = "let t : sigma (x : Bool) * Bool = (True, False); t.1";
     let mut ast = Ast::new();
     
     let (ty_expr, term_expr) = {

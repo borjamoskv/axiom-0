@@ -176,7 +176,7 @@ impl<'a> Checker<'a> {
             (Value::Meta(m1, sp1), Value::Meta(m2, sp2)) if m1 == m2 && sp1.len() == sp2.len() => {
                 sp1.iter().zip(sp2.iter()).all(|(x, y)| Self::unify(ast, x, y, depth, turbine))
             }
-            (Value::Meta(m, sp), val) | (val, Value::Meta(m, sp)) => {
+            (Value::Meta(m, _sp), val) | (val, Value::Meta(m, _sp)) => {
                 // Occurs check omitted for MVP
                 turbine.solve_meta(m, val);
                 true
@@ -227,7 +227,7 @@ impl<'a> Checker<'a> {
             return Err(Error::SharedExpression(expr));
         }
 
-        if let Expr::Lambda { plicity, quantity, body } = term {
+        if let Expr::Lambda { plicity: _, quantity, body } = term {
             if let Value::Pi(plic, decl_q, dom, cod_closure) = expected {
                 if quantity != decl_q {
                     return Err(Error::QuantityMismatch {
@@ -342,7 +342,6 @@ impl<'a> Checker<'a> {
                     });
                 }
             }
-            println!("EXACT MISMATCH: expr={:?} elab={:?} exp={:?}", expr, elab.ty, expected);
             return Err(Error::TypeMismatch {
                 expr,
                 expected: format!("{:?}", expected),
@@ -442,7 +441,7 @@ impl<'a> Checker<'a> {
                     })
                 }
             }
-            Expr::Meta(id) => {
+            Expr::Meta(_id) => {
                 // If it's explicitly written in AST, it should have a type, but we can't easily know it here.
                 // Normally holes are checked, or their type is inferred.
                 // We'll panic if Meta is found directly in synth without being resolved.
@@ -626,7 +625,7 @@ impl<'a> Checker<'a> {
                     }
                 }
 
-                if let Value::Pi(plic, decl_q, dom, cod) = f_elab.ty {
+                if let Value::Pi(_plic, decl_q, dom, cod) = f_elab.ty {
                     let mut arg_elab = self.check(argument, *dom, depth, env, types)?;
 
                     // Multiply argument usages by the Pi declared quantity
