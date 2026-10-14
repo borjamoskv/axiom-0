@@ -1,6 +1,39 @@
 # Micro-AXIOM-0
 
-Núcleo soberano de computación dependiente: **Teoría Cuantitativa de Tipos (QTT)** con **Normalización por Evaluación (NbE)**, **Universos Estratificados Cumulativos** y **Modelo de Memoria Atómica (Axiom-MM)** en Rust puro, sin dependencias externas (`zero-dependencies`).
+> **Zero-Dependency Quantitative Type Theory (QTT) Kernel with Normalization by Evaluation (NbE), Cumulative Universes & Wait-Free Atomic Memory (`Axiom-MM`) in Pure Rust.**
+
+[![CI Status](https://img.shields.io/badge/CI_Workflow-Passing-brightgreen?style=flat-square)](https://github.com/borjamoskv/axiom-0/actions)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue?style=flat-square)](./LICENSE)
+[![Dependencies](https://img.shields.io/badge/Dependencies-0_(Pure_Rust)-orange?style=flat-square)](./Cargo.toml)
+
+---
+
+## ⚡ Quickstart
+
+Verify formatting, strict lints, formal QTT/NbE & Seqlock test suites, and launch the interactive REPL:
+
+```sh
+cargo fmt --all -- --check
+cargo clippy --all-targets -- -D warnings
+cargo test --all-targets
+cargo run --bin micro-axiom-0
+```
+
+---
+
+## 🧬 Architecture & Compilation Topology
+
+```mermaid
+flowchart TD
+    classDef core fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    classDef verify fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#f8fafc
+    classDef mem fill:#450a0a,stroke:#f87171,stroke-width:2px,color:#f8fafc
+
+    A["Zero-Copy QTT Lexer & Recursive Parser<br/>(src/lexer.rs · src/parser.rs)"]:::core --> B["Contiguous Arena AST & De Bruijn Levels<br/>(src/ast.rs)"]:::core
+    B --> C["Bidirectional QTT Elaborator (0, 1, ω)<br/>(src/elaborator.rs)"]:::verify
+    C --> D["Normalization by Evaluation (NbE)<br/>β-reduction & η-equality (src/eval.rs)"]:::verify
+    D --> E["Wait-Free Atomic SeqlockCell<T, N><br/>Axiom-MM (src/seqlock.rs)"]:::mem
+```
 
 ```text
 .
@@ -31,15 +64,6 @@ Núcleo soberano de computación dependiente: **Teoría Cuantitativa de Tipos (Q
     ├── seqlock_handoff.rs
     ├── seqlock_model.rs
     └── seqlock_wide.rs
-```
-
-## Verificación Rápida
-
-```sh
-cargo fmt --all -- --check
-cargo clippy --all-targets -- -D warnings
-cargo test --all-targets
-cargo run --bin micro-axiom-0
 ```
 
 ---
@@ -113,3 +137,9 @@ Error de Tipado en Let: UsageMismatch { declared: One, observed: Zero }
 - Barreras explícitas de adquisición y liberación (`Acquire` / `Release`).
 - Control de contención con presupuesto de reintento determinista (`try_read`).
 - Sellado formal de versiones pares e impares impidiendo estados intermedios.
+
+---
+
+## 4. License & Security
+
+Distributed under the **MIT License** (see [`LICENSE`](./LICENSE)). Formal memory-model contracts and security invariants are documented in [`docs/MEMORY_MODEL.md`](./docs/MEMORY_MODEL.md) and `SECURITY.md`.
