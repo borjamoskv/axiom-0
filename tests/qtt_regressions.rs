@@ -238,3 +238,61 @@ fn dependent_annotation_does_not_turn_an_erased_type_binder_into_a_capture() {
 
     assert!(result.usages.is_empty());
 }
+
+#[test]
+fn succ_accounts_for_linear_and_erased_variable_usage() {
+    let mut ast = Ast::new();
+    let nat = ast.push(Expr::NatType).unwrap();
+    let erased_pi = pi(&mut ast, Quantity::Zero, nat, nat);
+    let expected_erased = eval(&ast, erased_pi, &[], None);
+
+    // fn :^0 x -> S(x) must fail because x is erased (:^0)
+    let x = var(&mut ast, 0);
+    let succ_x = ast.push(Expr::Succ(x)).unwrap();
+    let bad_erased = lambda(&mut ast, Quantity::Zero, succ_x);
+    assert_eq!(
+        check(&ast, bad_erased, expected_erased, &[]).unwrap_err(),
+        Error::UsageMismatch {
+            expr: bad_erased,
+            declared: Quantity::Zero,
+            observed: Quantity::One,
+        }
+    );
+}
+
+#[test]
+fn if_branches_require_matching_linear_consumption() {
+    let mut ast = Ast::new();
+    let nat = ast.push(Expr::NatType).unwrap();
+    let linear_pi = pi(&mut ast, Quantity::One, nat, nat);
+    let expected = eval(&ast, linear_pi, &[], None);
+
+    // fn :^1 x -> if True then x else x (valid: consumed once in each mutually exclusive branch)
+    let cond = ast.push(Expr::True).unwrap();
+    let x_then = var(&mut ast, 0);
+    let x_else = var(&mut ast, 0);
+    let branch_ok = ast
+        .push(Expr::If {
+            cond,
+            conseq: x_then,
+            alt: x_else,
+        })
+        .unwrap();
+    let lam_ok = lambda(&mut ast, Quantity::One, branch_ok);
+    assert!(check(&ast, lam_ok, expected.clone(), &[]).is_ok());
+
+    // fn :^1 x -> if True then x else Z (invalid: linear variable dropped in else branch)
+    let cond2 = ast.push(Expr::True).unwrap();
+    let x_then2 = var(&mut ast, 0);
+    let z_else2 = ast.push(Expr::Zero).unwrap();
+    let branch_bad = ast
+        .push(Expr::If {
+            cond: cond2,
+            conseq: x_then2,
+            alt: z_else2,
+        })
+        .unwrap();
+    let lam_bad = lambda(&mut ast, Quantity::One, branch_bad);
+    assert!(check(&ast, lam_bad, expected, &[]).is_err());
+}
+

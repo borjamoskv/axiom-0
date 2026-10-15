@@ -7,7 +7,7 @@ fn main() -> ExitCode {
     match start_repl() {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            let _ = writeln!(io::stderr().lock(), "Error de entrada/salida: {error}");
+            let _ = writeln!(io::stderr().lock(), "I/O error: {error}");
             ExitCode::FAILURE
         }
     }

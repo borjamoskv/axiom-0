@@ -13,7 +13,7 @@ pub fn run_repl<R: BufRead, W: Write>(mut reader: R, mut writer: W) -> io::Resul
     writeln!(writer, "=== AXIOM-0 REPL ===")?;
     writeln!(
         writer,
-        "Escribe expresiones o definiciones let. Usa exit, quit o Ctrl+D para salir."
+        "Enter expressions or let definitions. Use exit, quit, or Ctrl+D to exit."
     )?;
 
     let mut ast = Ast::new();
@@ -41,7 +41,7 @@ pub fn run_repl<R: BufRead, W: Write>(mut reader: R, mut writer: W) -> io::Resul
         let tokens = match lexer.tokenize_all() {
             Ok(tokens) => tokens,
             Err(error) => {
-                writeln!(writer, "Error léxico: {error:?}")?;
+                writeln!(writer, "Lexical error: {error:?}")?;
                 continue;
             }
         };
@@ -58,7 +58,7 @@ pub fn run_repl<R: BufRead, W: Write>(mut reader: R, mut writer: W) -> io::Resul
                         writeln!(writer, "==> Val: {value:?}")?;
                         writeln!(writer, "    Typ: {:?}", elaboration.ty)?;
                     }
-                    Err(error) => writeln!(writer, "Error de elaboración: {error}")?,
+                    Err(error) => writeln!(writer, "Elaboration error: {error}")?,
                 }
             }
             Ok(Command::Let { name, ty, term }) => {
@@ -70,12 +70,12 @@ pub fn run_repl<R: BufRead, W: Write>(mut reader: R, mut writer: W) -> io::Resul
                         Ok(_) => {
                             writeln!(
                                 writer,
-                                "Error de tipo en let: la anotación debe ser un tipo."
+                                "Type error in let: annotation must be a type."
                             )?;
                             continue;
                         }
                         Err(error) => {
-                            writeln!(writer, "Error de tipo en let: {error}")?;
+                            writeln!(writer, "Type error in let: {error}")?;
                             continue;
                         }
                     }
@@ -83,7 +83,7 @@ pub fn run_repl<R: BufRead, W: Write>(mut reader: R, mut writer: W) -> io::Resul
                     match check_in_env(&ast, term, expected.clone(), &global_env, &global_types) {
                         Ok(_) => expected,
                         Err(error) => {
-                            writeln!(writer, "Error de tipo en let: {error}")?;
+                            writeln!(writer, "Type error in let: {error}")?;
                             continue;
                         }
                     }
@@ -91,14 +91,14 @@ pub fn run_repl<R: BufRead, W: Write>(mut reader: R, mut writer: W) -> io::Resul
                     match synthesize_in_env(&ast, term, &global_env, &global_types) {
                         Ok(elaboration) => elaboration.ty,
                         Err(error) => {
-                            writeln!(writer, "Error de inferencia en let: {error}")?;
+                            writeln!(writer, "Inference error in let: {error}")?;
                             continue;
                         }
                     }
                 };
 
                 let value = eval(&ast, term, &global_env, None);
-                writeln!(writer, "{name} definido.")?;
+                writeln!(writer, "{name} defined.")?;
                 writeln!(writer, "==> Val: {value:?}")?;
                 writeln!(writer, "    Typ: {term_ty:?}")?;
 
@@ -106,7 +106,7 @@ pub fn run_repl<R: BufRead, W: Write>(mut reader: R, mut writer: W) -> io::Resul
                 global_env.push(value);
                 global_types.push(term_ty);
             }
-            Err(error) => writeln!(writer, "Error de sintaxis: {error}")?,
+            Err(error) => writeln!(writer, "Syntax error: {error}")?,
         }
     }
 }

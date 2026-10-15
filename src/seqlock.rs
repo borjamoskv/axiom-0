@@ -142,6 +142,7 @@ impl std::error::Error for WriteError {}
 /// The payload is `[T; N]`, each element stored in its own native atomic. All
 /// writes replace the entire payload; this is not a read-modify-write API.
 /// Fields are private, so callers cannot bypass versioning or downgrade orders.
+#[repr(align(64))]
 pub struct SeqlockCell<T: AtomicValue, const N: usize> {
     sequence: AtomicUsize,
     words: [T::Atomic; N],

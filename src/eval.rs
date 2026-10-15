@@ -24,6 +24,7 @@ pub enum Value {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Neutral {
     Var(Level),
+    If(Box<Neutral>, Box<Value>, Box<Value>),
     Ind(Box<Value>, Box<Value>, Box<Value>, Box<Neutral>),
     J(Box<Value>, Box<Value>, Box<Neutral>),
     App(crate::ast::Plicity, Box<Neutral>, Box<Value>),
@@ -46,7 +47,10 @@ impl Closure {
 }
 
 pub fn eval(ast: &Ast, expr: ExprId, env: &[Value], turbine: Option<&crate::turbine::TurbineEngine>) -> Value {
-    match ast.expr(expr).expect("valid expr") {
+    let Ok(node) = ast.expr(expr) else {
+        return Value::Unit;
+    };
+    match node {
         Expr::Var(level) => {
             if let Some(v) = env.get(level.0) {
                 v.clone()
@@ -63,8 +67,12 @@ pub fn eval(ast: &Ast, expr: ExprId, env: &[Value], turbine: Option<&crate::turb
             match eval(ast, cond, env, turbine) {
                 Value::True => eval(ast, conseq, env, turbine),
                 Value::False => eval(ast, alt, env, turbine),
-                Value::Neutral(n) => Value::Neutral(Neutral::App(crate::ast::Plicity::Explicit, Box::new(n), Box::new(Value::True))), // Simplified for if
-                _ => panic!("if evaluado sobre no-booleano"),
+                Value::Neutral(n) => Value::Neutral(Neutral::If(
+                    Box::new(n),
+                    Box::new(eval(ast, conseq, env, turbine)),
+                    Box::new(eval(ast, alt, env, turbine)),
+                )),
+                other => other,
             }
         }
         Expr::Sigma { quantity, domain, codomain } => Value::Sigma(
@@ -79,12 +87,12 @@ pub fn eval(ast: &Ast, expr: ExprId, env: &[Value], turbine: Option<&crate::turb
         Expr::Fst(body) => match eval(ast, body, env, turbine) {
             Value::Pair(f, _) => *f,
             Value::Neutral(n) => Value::Neutral(Neutral::Fst(Box::new(n))),
-            _ => panic!("fst sobre no-par"),
+            other => other,
         },
         Expr::Snd(body) => match eval(ast, body, env, turbine) {
             Value::Pair(_, s) => *s,
             Value::Neutral(n) => Value::Neutral(Neutral::Snd(Box::new(n))),
-            _ => panic!("snd sobre no-par"),
+            other => other,
         },
         Expr::Universe(level) => Value::Universe(level),
         Expr::Pi { plicity, quantity, domain, codomain } => Value::Pi(
@@ -101,40 +109,34 @@ pub fn eval(ast: &Ast, expr: ExprId, env: &[Value], turbine: Option<&crate::turb
         Expr::App { plicity, function, argument } => {
             let mut f_val = eval(ast, function, env, turbine);
             if let Some(turbine) = turbine {
-                let map = turbine.inserted_implicits.read().unwrap();
+                let map = turbine
+                    .inserted_implicits
+                    .read()
+                    .unwrap_or_else(|e| e.into_inner());
                 if let Some(implicits) = map.get(&expr) {
                     for &imp in implicits {
                         let imp_val = Value::Meta(imp, env.to_vec());
-                        f_val = match f_val {
-                            Value::Lam(_, _, closure) => closure.instantiate(ast, imp_val, Some(turbine)),
-                            Value::Neutral(neu) => Value::Neutral(Neutral::App(crate::ast::Plicity::Implicit, Box::new(neu), Box::new(imp_val))),
-                            _ => panic!("Cannot apply implicit to non-lambda"),
-                        };
+                        f_val = apply(ast, crate::ast::Plicity::Implicit, f_val, imp_val, Some(turbine));
                     }
                 }
             }
             let a_val = eval(ast, argument, env, turbine);
-            match f_val {
-                Value::Lam(_, _, closure) => closure.instantiate(ast, a_val, turbine),
-                Value::Neutral(neu) => Value::Neutral(Neutral::App(plicity, Box::new(neu), Box::new(a_val))),
-                Value::Meta(id, mut spine) => {
-                    spine.push(a_val);
-                    Value::Meta(id, spine)
-                }
-                _ => panic!("aplicación mal formada"),
-            }
+            apply(ast, plicity, f_val, a_val, turbine)
         }
         Expr::Ann { term, .. } => eval(ast, term, env, turbine),
         Expr::Hole => {
             if let Some(turbine) = turbine {
-                let map = turbine.expr_to_meta.read().unwrap();
+                let map = turbine
+                    .expr_to_meta
+                    .read()
+                    .unwrap_or_else(|e| e.into_inner());
                 if let Some(&meta_id) = map.get(&expr) {
                     Value::Meta(meta_id, Vec::new())
                 } else {
-                    panic!("Hole encountered in eval but no MetaId was mapped by elaborator!");
+                    Value::Neutral(Neutral::Var(Level(usize::MAX)))
                 }
             } else {
-                panic!("Holes cannot be evaluated directly without elaborator");
+                Value::Neutral(Neutral::Var(Level(usize::MAX)))
             }
         }
         Expr::Meta(id) => Value::Meta(id, Vec::new()),
@@ -232,6 +234,9 @@ pub fn equiv(ast: &Ast, a: &Value, b: &Value, depth: usize) -> bool {
 pub fn equiv_neu(ast: &Ast, n1: &Neutral, n2: &Neutral, depth: usize) -> bool {
     match (n1, n2) {
         (Neutral::Var(l1), Neutral::Var(l2)) => l1 == l2,
+        (Neutral::If(c1, t1, e1), Neutral::If(c2, t2, e2)) => {
+            equiv_neu(ast, c1, c2, depth) && equiv(ast, t1, t2, depth) && equiv(ast, e1, e2, depth)
+        }
         (Neutral::App(p1, f1, a1), Neutral::App(p2, f2, a2)) => {
             if p1 != p2 { return false; }
             equiv_neu(ast, f1, f2, depth) && equiv(ast, a1, a2, depth)
@@ -261,7 +266,7 @@ pub fn apply(ast: &Ast, plicity: crate::ast::Plicity, function: Value, argument:
             spine.push(argument);
             Value::Meta(id, spine)
         }
-        _ => panic!("Cannot apply to non-function"),
+        other => other,
     }
 }
 
@@ -269,12 +274,12 @@ fn eval_ind(ast: &Ast, mot: Value, z: Value, s: Value, target: Value, turbine: O
     match target {
         Value::Zero => z,
         Value::Succ(n) => {
-            let ih = eval_ind(ast, mot.clone(), z, s.clone(), *n.clone(), turbine);
+            let ih = eval_ind(ast, mot, z, s.clone(), *n.clone(), turbine);
             let step_applied = apply(ast, crate::ast::Plicity::Explicit, s, *n, turbine);
             apply(ast, crate::ast::Plicity::Explicit, step_applied, ih, turbine)
         }
         Value::Neutral(n) => Value::Neutral(Neutral::Ind(Box::new(mot), Box::new(z), Box::new(s), Box::new(n))),
-        _ => panic!("Invalid target for ind"),
+        other => other,
     }
 }
 
@@ -282,6 +287,6 @@ fn eval_j(_ast: &Ast, mot: Value, base: Value, target: Value, _turbine: Option<&
     match target {
         Value::Refl(_) => base,
         Value::Neutral(n) => Value::Neutral(Neutral::J(Box::new(mot), Box::new(base), Box::new(n))),
-        _ => panic!("Invalid target for J: must be Refl or Neutral"),
+        other => other,
     }
 }

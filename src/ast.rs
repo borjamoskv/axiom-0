@@ -54,11 +54,19 @@ impl ArenaId {
     }
 
     fn fresh() -> Self {
-        Self(
-            NEXT_ARENA
-                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
-                .expect("arena exhaust"),
-        )
+        let mut current = NEXT_ARENA.load(Ordering::Relaxed);
+        loop {
+            let next = current.saturating_add(1);
+            match NEXT_ARENA.compare_exchange_weak(
+                current,
+                next,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => return Self(current),
+                Err(actual) => current = actual,
+            }
+        }
     }
 }
 

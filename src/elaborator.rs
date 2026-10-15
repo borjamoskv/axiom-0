@@ -206,16 +206,44 @@ impl<'a> Checker<'a> {
                     Self::unify(ast, &v1, &v2, depth + 1, turbine)
                 }
             }
-            (Value::Pi(_, q1, d1, c1), Value::Pi(_, q2, d2, c2)) => {
-                q1 == q2 && Self::unify(ast, &d1, &d2, depth, turbine) && {
+            (Value::Pi(p1, q1, d1, c1), Value::Pi(p2, q2, d2, c2)) => {
+                p1 == p2 && q1 == q2 && Self::unify(ast, &d1, &d2, depth, turbine) && {
                     let var = Value::Neutral(crate::eval::Neutral::Var(Level(depth)));
                     let v1 = c1.instantiate(ast, var.clone(), Some(turbine));
                     let v2 = c2.instantiate(ast, var, Some(turbine));
                     Self::unify(ast, &v1, &v2, depth + 1, turbine)
                 }
             }
+            (Value::Lam(p1, q1, c1), Value::Lam(p2, q2, c2)) => {
+                p1 == p2 && q1 == q2 && {
+                    let var = Value::Neutral(crate::eval::Neutral::Var(Level(depth)));
+                    let v1 = c1.instantiate(ast, var.clone(), Some(turbine));
+                    let v2 = c2.instantiate(ast, var, Some(turbine));
+                    Self::unify(ast, &v1, &v2, depth + 1, turbine)
+                }
+            }
+            (Value::Lam(_p, _q, c), Value::Neutral(n)) => {
+                let var = Value::Neutral(crate::eval::Neutral::Var(Level(depth)));
+                let v1 = c.instantiate(ast, var.clone(), Some(turbine));
+                let v2 = Value::Neutral(crate::eval::Neutral::App(
+                    crate::ast::Plicity::Explicit,
+                    Box::new(n),
+                    Box::new(var),
+                ));
+                Self::unify(ast, &v1, &v2, depth + 1, turbine)
+            }
+            (Value::Neutral(n), Value::Lam(_p, _q, c)) => {
+                let var = Value::Neutral(crate::eval::Neutral::Var(Level(depth)));
+                let v1 = Value::Neutral(crate::eval::Neutral::App(
+                    crate::ast::Plicity::Explicit,
+                    Box::new(n),
+                    Box::new(var.clone()),
+                ));
+                let v2 = c.instantiate(ast, var, Some(turbine));
+                Self::unify(ast, &v1, &v2, depth + 1, turbine)
+            }
             (Value::Universe(u1), Value::Universe(u2)) => u1 == u2,
-            (Value::Neutral(n1), Value::Neutral(n2)) => crate::eval::equiv_neu(ast, &n1, &n2, depth), // Might need turbine for neu
+            (Value::Neutral(n1), Value::Neutral(n2)) => crate::eval::equiv_neu(ast, &n1, &n2, depth),
             _ => false,
         }
     }
@@ -292,6 +320,9 @@ impl<'a> Checker<'a> {
         if let Expr::Pair { first, second } = term {
             if let Value::Sigma(decl_q, dom, cod_closure) = expected.clone() {
                 let mut first_elab = self.check(first, (*dom).clone(), depth, env, types)?;
+                for u in first_elab.usages.iter_mut() {
+                    *u = u.times(decl_q);
+                }
                 let first_val = eval(self.ast, first, env, self.turbine);
                 let expected_second = cod_closure.clone().instantiate(self.ast, first_val, self.turbine);
                 let second_elab = self.check(second, expected_second, depth, env, types)?;
@@ -333,7 +364,7 @@ impl<'a> Checker<'a> {
 
         if let Expr::Refl(x) = term {
             if let Value::IdType(ref ty_a, ref lhs, ref rhs) = expected {
-                let x_elab = self.check(x, (**ty_a).clone(), depth, env, types)?;
+                let _x_elab = self.check(x, (**ty_a).clone(), depth, env, types)?;
                 let x_val = eval(self.ast, x, env, self.turbine);
                 
                 let unified_lhs = if let Some(t) = self.turbine {
@@ -361,7 +392,7 @@ impl<'a> Checker<'a> {
                 }
                 return Ok(Elaboration {
                     ty: expected,
-                    usages: x_elab.usages,
+                    usages: vec![],
                 });
             } else {
                 return Err(Error::TypeMismatch {
@@ -474,7 +505,11 @@ impl<'a> Checker<'a> {
                 if let Some(turbine) = self.turbine {
                     let meta_ty_id = turbine.new_meta();
                     let meta_val_id = turbine.new_meta();
-                    turbine.expr_to_meta.write().unwrap().insert(expr, meta_val_id);
+                    turbine
+                        .expr_to_meta
+                        .write()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .insert(expr, meta_val_id);
                     let meta_ty = Value::Meta(meta_ty_id, Vec::new());
                     Ok(Elaboration {
                         ty: meta_ty,
@@ -488,24 +523,38 @@ impl<'a> Checker<'a> {
                     })
                 }
             }
-            Expr::Meta(_id) => {
-                // If it's explicitly written in AST, it should have a type, but we can't easily know it here.
-                // Normally holes are checked, or their type is inferred.
-                // We'll panic if Meta is found directly in synth without being resolved.
-                panic!("Expr::Meta synthesized directly");
+            Expr::Meta(id) => {
+                if let Some(turbine) = self.turbine {
+                    let forced = turbine.force(self.ast, Value::Meta(id, Vec::new()));
+                    Ok(Elaboration {
+                        ty: forced,
+                        usages: vec![],
+                    })
+                } else {
+                    Err(Error::TypeMismatch {
+                        expr,
+                        expected: "resolved term".into(),
+                        found: format!("Meta({:?})", id),
+                    })
+                }
             }
             Expr::If { cond, conseq, alt } => {
                 let cond_elab = self.check(cond, Value::Bool, depth, env, types)?;
                 let conseq_elab = self.synth(conseq, depth, env, types)?;
                 let alt_elab = self.check(alt, conseq_elab.ty.clone(), depth, env, types)?;
 
-                let mut usages = cond_elab.usages;
-                let max_len = usages.len().max(conseq_elab.usages.len()).max(alt_elab.usages.len());
-                usages.resize(max_len, Quantity::Zero);
-                for (i, u) in conseq_elab.usages.into_iter().enumerate() {
-                    usages[i] = usages[i].plus(u);
+                let branch_len = conseq_elab.usages.len().max(alt_elab.usages.len());
+                let mut branch_usages = vec![Quantity::Zero; branch_len];
+                for (i, slot) in branch_usages.iter_mut().enumerate() {
+                    let u_c = conseq_elab.usages.get(i).copied().unwrap_or(Quantity::Zero);
+                    let u_a = alt_elab.usages.get(i).copied().unwrap_or(Quantity::Zero);
+                    *slot = if u_c == u_a { u_c } else { Quantity::Omega };
                 }
-                for (i, u) in alt_elab.usages.into_iter().enumerate() {
+
+                let mut usages = cond_elab.usages;
+                let max_len = usages.len().max(branch_usages.len());
+                usages.resize(max_len, Quantity::Zero);
+                for (i, u) in branch_usages.into_iter().enumerate() {
                     usages[i] = usages[i].plus(u);
                 }
 
@@ -516,7 +565,14 @@ impl<'a> Checker<'a> {
             }
             Expr::Fst(body) => {
                 let body_elab = self.synth(body, depth, env, types)?;
-                if let Value::Sigma(_q, dom, _) = body_elab.ty {
+                if let Value::Sigma(q, dom, _) = body_elab.ty {
+                    if q == Quantity::Zero {
+                        return Err(Error::UsageMismatch {
+                            expr,
+                            declared: Quantity::Zero,
+                            observed: Quantity::One,
+                        });
+                    }
                     Ok(Elaboration {
                         ty: *dom,
                         usages: body_elab.usages,
@@ -536,7 +592,7 @@ impl<'a> Checker<'a> {
                     let fst_val = match body_val {
                         Value::Pair(first, _) => *first,
                         Value::Neutral(n) => Value::Neutral(crate::eval::Neutral::Fst(Box::new(n))),
-                        _ => panic!("eval error in elaborator for snd"),
+                        other => other,
                     };
                     Ok(Elaboration {
                         ty: cod_closure.instantiate(self.ast, fst_val, self.turbine),
@@ -640,7 +696,7 @@ impl<'a> Checker<'a> {
                     }
                 };
                 let ty_val = eval(self.ast, ty, env, self.turbine);
-                let elab = self.check(term, ty_val.clone(), depth, env, types)?;
+                let elab = self.check(term, ty_val, depth, env, types)?;
                 Ok(elab)
             }
             Expr::App { plicity, function, argument } => {
@@ -668,7 +724,11 @@ impl<'a> Checker<'a> {
 
                 if !implicits_to_insert.is_empty() {
                     if let Some(turbine) = self.turbine {
-                        turbine.inserted_implicits.write().unwrap().insert(expr, implicits_to_insert);
+                        turbine
+                            .inserted_implicits
+                            .write()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .insert(expr, implicits_to_insert);
                     }
                 }
 
@@ -710,89 +770,14 @@ impl<'a> Checker<'a> {
                 Ok(Elaboration { ty, usages: vec![] })
             }
             Expr::Succ(n) => {
-                self.check(n, Value::NatType, depth, env, types)?;
-                let ty = Value::NatType;
-                Ok(Elaboration { ty, usages: vec![] })
+                let n_elab = self.check(n, Value::NatType, depth, env, types)?;
+                Ok(Elaboration {
+                    ty: Value::NatType,
+                    usages: n_elab.usages,
+                })
             }
             Expr::Ind { mot, z, s, target } => {
-                let target_elab = self.synth(target, depth, env, types)?;
-                let unified_target = if let Some(t) = self.turbine {
-                    Checker::unify(self.ast, &target_elab.ty, &Value::NatType, depth, t)
-                } else {
-                    target_elab.ty == Value::NatType
-                };
-                if !unified_target {
-                    panic!("TARGET UNIFY FAILED");
-                }
-                
-                let target_val = crate::eval::eval(self.ast, target, env, self.turbine);
-                
-                let mot_term = self.ast.expr(mot)?;
-                if let Expr::Lambda { body: mot_body1, .. } = mot_term {
-                    let mut env_mot = env.to_vec();
-                    let mut types_mot = types.to_vec();
-                    types_mot.push(Value::NatType);
-                    let var_n = Value::Neutral(crate::eval::Neutral::Var(crate::ast::Level(depth)));
-                    env_mot.push(var_n.clone());
-                    
-                    let mot_body_elab = self.synth(mot_body1, depth + 1, &env_mot, &types_mot)?;
-                    if let Value::Universe(_) = mot_body_elab.ty {
-                        // valid motive body
-                    } else {
-                        panic!("MOT BODY MUST BE A TYPE");
-                    }
-                } else {
-                    let mot_elab = self.synth(mot, depth, env, types)?;
-                    match mot_elab.ty {
-                        Value::Pi(_, _, ref domain, _) => {
-                            let unified_domain = if let Some(t) = self.turbine {
-                                Checker::unify(self.ast, &**domain, &Value::NatType, depth, t)
-                            } else {
-                                **domain == Value::NatType
-                            };
-                            if !unified_domain {
-                                panic!("DOMAIN UNIFY FAILED");
-                            }
-                        }
-                        _ => panic!("MOT MUST BE A FUNCTION NAT -> TYPE"),
-                    }
-                }
-                let mot_val = crate::eval::eval(self.ast, mot, env, self.turbine);
-                
-                let z_ty = crate::eval::apply(self.ast, crate::ast::Plicity::Explicit, mot_val.clone(), Value::Zero, self.turbine);
-                self.check(z, z_ty, depth, env, types)?;
-                
-                let s_term = self.ast.expr(s)?;
-                if let Expr::Lambda { body: s_body1, .. } = s_term {
-                    let mut env1 = env.to_vec();
-                    let mut types1 = types.to_vec();
-                    types1.push(Value::NatType);
-                    let var_n = Value::Neutral(crate::eval::Neutral::Var(crate::ast::Level(depth)));
-                    env1.push(var_n.clone());
-                    
-                    let s_body1_term = self.ast.expr(s_body1)?;
-                    if let Expr::Lambda { body: s_body2, .. } = s_body1_term {
-                        let mut env2 = env1.clone();
-                        let mut types2 = types1.clone();
-                        
-                        let mot_n = crate::eval::apply(self.ast, crate::ast::Plicity::Explicit, mot_val.clone(), var_n.clone(), self.turbine);
-                        types2.push(mot_n);
-                        let var_ih = Value::Neutral(crate::eval::Neutral::Var(crate::ast::Level(depth + 1)));
-                        env2.push(var_ih.clone());
-                        
-                        let succ_n = Value::Succ(Box::new(var_n));
-                        let mot_succ_n = crate::eval::apply(self.ast, crate::ast::Plicity::Explicit, mot_val.clone(), succ_n, self.turbine);
-                        
-                        self.check(s_body2, mot_succ_n, depth + 2, &env2, &types2)?;
-                    } else {
-                        panic!("S EXPECTED FUNCTION");
-                    }
-                } else {
-                    panic!("S WAS NOT A LAMBDA");
-                }
-                
-                let ret_ty = crate::eval::apply(self.ast, crate::ast::Plicity::Explicit, mot_val, target_val, self.turbine);
-                Ok(Elaboration { ty: ret_ty, usages: vec![] })
+                self.synth_ind((mot, z, s, target), depth, env, types)
             }
             Expr::IdType { ty, lhs, rhs } => {
                 let ty_elab = self.synth(ty, depth, env, types)?;
@@ -805,21 +790,12 @@ impl<'a> Checker<'a> {
                     }),
                 };
                 let ty_val = eval(self.ast, ty, env, self.turbine);
-                let lhs_elab = self.check(lhs, ty_val.clone(), depth, env, types)?;
-                let rhs_elab = self.check(rhs, ty_val, depth, env, types)?;
+                let _lhs_elab = self.check(lhs, ty_val.clone(), depth, env, types)?;
+                let _rhs_elab = self.check(rhs, ty_val, depth, env, types)?;
 
-                let max_len = ty_elab.usages.len().max(lhs_elab.usages.len()).max(rhs_elab.usages.len());
-                let mut usages = ty_elab.usages;
-                usages.resize(max_len, Quantity::Zero);
-                for (i, u) in lhs_elab.usages.into_iter().enumerate() {
-                    usages[i] = usages[i].plus(u);
-                }
-                for (i, u) in rhs_elab.usages.into_iter().enumerate() {
-                    usages[i] = usages[i].plus(u);
-                }
                 Ok(Elaboration {
                     ty: Value::Universe(u_level),
-                    usages,
+                    usages: vec![],
                 })
             }
             Expr::Refl(x) => {
@@ -828,64 +804,217 @@ impl<'a> Checker<'a> {
                 let ty = Value::IdType(Box::new(x_elab.ty), Box::new(x_val.clone()), Box::new(x_val));
                 Ok(Elaboration {
                     ty,
-                    usages: x_elab.usages,
+                    usages: vec![],
                 })
             }
             Expr::J { mot, base, target } => {
-                let target_elab = self.synth(target, depth, env, types)?;
-                let (ty_a, lhs, rhs) = match target_elab.ty {
-                    Value::IdType(ty_a, lhs, rhs) => (*ty_a, *lhs, *rhs),
-                    _ => return Err(Error::TypeMismatch {
-                        expr: target,
-                        expected: "IdType".into(),
-                        found: format!("{:?}", target_elab.ty),
-                    }),
-                };
-                let target_val = eval(self.ast, target, env, self.turbine);
-                let mot_val = eval(self.ast, mot, env, self.turbine);
-
-                let mot_term = self.ast.expr(mot)?;
-                if let Expr::Lambda { body: mot_body1, .. } = mot_term {
-                    let mut env1 = env.to_vec();
-                    let mut types1 = types.to_vec();
-                    types1.push(ty_a.clone());
-                    let var_x = Value::Neutral(crate::eval::Neutral::Var(crate::ast::Level(depth)));
-                    env1.push(var_x.clone());
-
-                    let mot_body1_term = self.ast.expr(mot_body1)?;
-                    if let Expr::Lambda { body: mot_body2, .. } = mot_body1_term {
-                        let mut env2 = env1.clone();
-                        let mut types2 = types1.clone();
-                        let id_ty = Value::IdType(Box::new(ty_a.clone()), Box::new(lhs.clone()), Box::new(var_x));
-                        types2.push(id_ty);
-                        let var_p = Value::Neutral(crate::eval::Neutral::Var(crate::ast::Level(depth + 1)));
-                        env2.push(var_p);
-
-                        let mot_body_elab = self.synth(mot_body2, depth + 2, &env2, &types2)?;
-                        match mot_body_elab.ty {
-                            Value::Universe(_) => {}
-                            _ => panic!("MOT BODY MUST BE A TYPE"),
-                        }
-                    }
-                }
-
-                let refl_lhs = Value::Refl(Box::new(lhs.clone()));
-                let step1 = crate::eval::apply(self.ast, crate::ast::Plicity::Explicit, mot_val.clone(), lhs, self.turbine);
-                let expected_base_ty = crate::eval::apply(self.ast, crate::ast::Plicity::Explicit, step1, refl_lhs, self.turbine);
-                let base_elab = self.check(base, expected_base_ty, depth, env, types)?;
-
-                let step_rhs = crate::eval::apply(self.ast, crate::ast::Plicity::Explicit, mot_val, rhs, self.turbine);
-                let ret_ty = crate::eval::apply(self.ast, crate::ast::Plicity::Explicit, step_rhs, target_val, self.turbine);
-
-                let max_len = target_elab.usages.len().max(base_elab.usages.len());
-                let mut usages = target_elab.usages;
-                usages.resize(max_len, Quantity::Zero);
-                for (i, u) in base_elab.usages.into_iter().enumerate() {
-                    usages[i] = usages[i].plus(u);
-                }
-
-                Ok(Elaboration { ty: ret_ty, usages })
+                self.synth_j(mot, base, target, depth, env, types)
             }
         }
+    }
+
+    fn synth_ind(
+        &mut self,
+        (mot, z, s, target): (ExprId, ExprId, ExprId, ExprId),
+        depth: usize,
+        env: &[Value],
+        types: &[Value],
+    ) -> Result<Elaboration, Error> {
+        let target_elab = self.synth(target, depth, env, types)?;
+        let unified_target = if let Some(t) = self.turbine {
+            Checker::unify(self.ast, &target_elab.ty, &Value::NatType, depth, t)
+        } else {
+            target_elab.ty == Value::NatType
+        };
+        if !unified_target {
+            return Err(Error::TypeMismatch {
+                expr: target,
+                expected: "Nat".into(),
+                found: format!("{:?}", target_elab.ty),
+            });
+        }
+
+        let target_val = crate::eval::eval(self.ast, target, env, self.turbine);
+
+        let mot_term = self.ast.expr(mot)?;
+        if let Expr::Lambda { body: mot_body1, .. } = mot_term {
+            let mut env_mot = env.to_vec();
+            let mut types_mot = types.to_vec();
+            types_mot.push(Value::NatType);
+            let var_n = Value::Neutral(crate::eval::Neutral::Var(crate::ast::Level(depth)));
+            env_mot.push(var_n);
+
+            let mot_body_elab = self.synth(mot_body1, depth + 1, &env_mot, &types_mot)?;
+            if !matches!(mot_body_elab.ty, Value::Universe(_)) {
+                return Err(Error::TypeMismatch {
+                    expr: mot_body1,
+                    expected: "Universe".into(),
+                    found: format!("{:?}", mot_body_elab.ty),
+                });
+            }
+        } else {
+            let mot_elab = self.synth(mot, depth, env, types)?;
+            match mot_elab.ty {
+                Value::Pi(_, _, ref domain, _) => {
+                    let unified_domain = if let Some(t) = self.turbine {
+                        Checker::unify(self.ast, domain, &Value::NatType, depth, t)
+                    } else {
+                        **domain == Value::NatType
+                    };
+                    if !unified_domain {
+                        return Err(Error::TypeMismatch {
+                            expr: mot,
+                            expected: "Pi(Nat, Universe)".into(),
+                            found: format!("{:?}", mot_elab.ty),
+                        });
+                    }
+                }
+                other => {
+                    return Err(Error::ExpectedFunction {
+                        expr: mot,
+                        found: format!("{:?}", other),
+                    });
+                }
+            }
+        }
+        let mot_val = crate::eval::eval(self.ast, mot, env, self.turbine);
+
+        let z_ty = crate::eval::apply(self.ast, crate::ast::Plicity::Explicit, mot_val.clone(), Value::Zero, self.turbine);
+        let z_elab = self.check(z, z_ty, depth, env, types)?;
+
+        let s_term = self.ast.expr(s)?;
+        let mut s_usages = if let Expr::Lambda { quantity: q_n, body: s_body1, .. } = s_term {
+            let mut env1 = env.to_vec();
+            let mut types1 = types.to_vec();
+            types1.push(Value::NatType);
+            let var_n = Value::Neutral(crate::eval::Neutral::Var(crate::ast::Level(depth)));
+            env1.push(var_n.clone());
+
+            let s_body1_term = self.ast.expr(s_body1)?;
+            if let Expr::Lambda { quantity: q_ih, body: s_body2, .. } = s_body1_term {
+                let mut env2 = env1;
+                let mut types2 = types1;
+
+                let mot_n = crate::eval::apply(self.ast, crate::ast::Plicity::Explicit, mot_val.clone(), var_n.clone(), self.turbine);
+                types2.push(mot_n);
+                let var_ih = Value::Neutral(crate::eval::Neutral::Var(crate::ast::Level(depth + 1)));
+                env2.push(var_ih);
+
+                let succ_n = Value::Succ(Box::new(var_n));
+                let mot_succ_n = crate::eval::apply(self.ast, crate::ast::Plicity::Explicit, mot_val.clone(), succ_n, self.turbine);
+
+                let mut s_body_elab = self.check(s_body2, mot_succ_n, depth + 2, &env2, &types2)?;
+                let obs_ih = s_body_elab.usages.get(depth + 1).copied().unwrap_or(Quantity::Zero);
+                if !q_ih.permits(obs_ih) {
+                    return Err(Error::UsageMismatch {
+                        expr: s_body1,
+                        declared: q_ih,
+                        observed: obs_ih,
+                    });
+                }
+                let obs_n = s_body_elab.usages.get(depth).copied().unwrap_or(Quantity::Zero);
+                if !q_n.permits(obs_n) {
+                    return Err(Error::UsageMismatch {
+                        expr: s,
+                        declared: q_n,
+                        observed: obs_n,
+                    });
+                }
+                if s_body_elab.usages.len() > depth {
+                    s_body_elab.usages.truncate(depth);
+                }
+                s_body_elab.usages
+            } else {
+                return Err(Error::ExpectedFunction {
+                    expr: s_body1,
+                    found: format!("{:?}", s_body1_term),
+                });
+            }
+        } else {
+            return Err(Error::ExpectedFunction {
+                expr: s,
+                found: format!("{:?}", s_term),
+            });
+        };
+
+        for u in s_usages.iter_mut() {
+            *u = u.times(Quantity::Omega);
+        }
+
+        let mut usages = target_elab.usages;
+        let max_len = usages.len().max(z_elab.usages.len()).max(s_usages.len());
+        usages.resize(max_len, Quantity::Zero);
+        for (i, u) in z_elab.usages.into_iter().enumerate() {
+            usages[i] = usages[i].plus(u);
+        }
+        for (i, u) in s_usages.into_iter().enumerate() {
+            usages[i] = usages[i].plus(u);
+        }
+
+        let ret_ty = crate::eval::apply(self.ast, crate::ast::Plicity::Explicit, mot_val, target_val, self.turbine);
+        Ok(Elaboration { ty: ret_ty, usages })
+    }
+
+    fn synth_j(
+        &mut self,
+        mot: ExprId,
+        base: ExprId,
+        target: ExprId,
+        depth: usize,
+        env: &[Value],
+        types: &[Value],
+    ) -> Result<Elaboration, Error> {
+        let target_elab = self.synth(target, depth, env, types)?;
+        let (ty_a, lhs, rhs) = match target_elab.ty {
+            Value::IdType(ty_a, lhs, rhs) => (*ty_a, *lhs, *rhs),
+            _ => return Err(Error::TypeMismatch {
+                expr: target,
+                expected: "IdType".into(),
+                found: format!("{:?}", target_elab.ty),
+            }),
+        };
+        let target_val = eval(self.ast, target, env, self.turbine);
+        let mot_val = eval(self.ast, mot, env, self.turbine);
+
+        let mot_term = self.ast.expr(mot)?;
+        if let Expr::Lambda { body: mot_body1, .. } = mot_term {
+            let mut env1 = env.to_vec();
+            let mut types1 = types.to_vec();
+            types1.push(ty_a.clone());
+            let var_x = Value::Neutral(crate::eval::Neutral::Var(crate::ast::Level(depth)));
+            env1.push(var_x.clone());
+
+            let mot_body1_term = self.ast.expr(mot_body1)?;
+            if let Expr::Lambda { body: mot_body2, .. } = mot_body1_term {
+                let mut env2 = env1;
+                let mut types2 = types1;
+                let id_ty = Value::IdType(Box::new(ty_a), Box::new(lhs.clone()), Box::new(var_x));
+                types2.push(id_ty);
+                let var_p = Value::Neutral(crate::eval::Neutral::Var(crate::ast::Level(depth + 1)));
+                env2.push(var_p);
+
+                let mot_body_elab = self.synth(mot_body2, depth + 2, &env2, &types2)?;
+                if !matches!(mot_body_elab.ty, Value::Universe(_)) {
+                    return Err(Error::TypeMismatch {
+                        expr: mot_body2,
+                        expected: "Universe".into(),
+                        found: format!("{:?}", mot_body_elab.ty),
+                    });
+                }
+            }
+        }
+
+        let refl_lhs = Value::Refl(Box::new(lhs.clone()));
+        let step1 = crate::eval::apply(self.ast, crate::ast::Plicity::Explicit, mot_val.clone(), lhs, self.turbine);
+        let expected_base_ty = crate::eval::apply(self.ast, crate::ast::Plicity::Explicit, step1, refl_lhs, self.turbine);
+        let base_elab = self.check(base, expected_base_ty, depth, env, types)?;
+
+        let step_rhs = crate::eval::apply(self.ast, crate::ast::Plicity::Explicit, mot_val, rhs, self.turbine);
+        let ret_ty = crate::eval::apply(self.ast, crate::ast::Plicity::Explicit, step_rhs, target_val, self.turbine);
+
+        Ok(Elaboration {
+            ty: ret_ty,
+            usages: base_elab.usages,
+        })
     }
 }

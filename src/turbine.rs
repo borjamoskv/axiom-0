@@ -281,7 +281,7 @@ impl TurbineEngine {
 
     /// Instantiates a new metavariable.
     pub fn new_meta(&self) -> crate::ast::MetaId {
-        let mut ctx = self.meta_ctx.write().unwrap();
+        let mut ctx = self.meta_ctx.write().unwrap_or_else(|e| e.into_inner());
         let id = ctx.len();
         ctx.push(None);
         crate::ast::MetaId(id)
@@ -289,19 +289,25 @@ impl TurbineEngine {
 
     /// Resolves a metavariable with a value.
     pub fn solve_meta(&self, meta: crate::ast::MetaId, value: Value) {
-        let mut ctx = self.meta_ctx.write().unwrap();
+        let mut ctx = self.meta_ctx.write().unwrap_or_else(|e| e.into_inner());
         if ctx[meta.0].is_none() {
             ctx[meta.0] = Some(value);
         }
     }
 
     /// Forces a value, substituting solved metavariables recursively at the head.
-    pub fn force(&self, ast: &Ast, val: Value) -> Value {
+    pub fn force(&self, _ast: &Ast, val: Value) -> Value {
         match val {
             Value::Meta(id, spine) => {
-                let solution = self.meta_ctx.read().unwrap()[id.0].clone();
+                let solution = self
+                    .meta_ctx
+                    .read()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .get(id.0)
+                    .cloned()
+                    .flatten();
                 if let Some(sol) = solution {
-                    self.force(ast, sol)
+                    self.force(_ast, sol)
                 } else {
                     Value::Meta(id, spine)
                 }
@@ -428,9 +434,10 @@ impl TurbineEngine {
             }
 
             for handle in handles {
-                let chunk_res = handle.join().expect("Worker thread panicked in turbine");
-                for (offset, (base, res)) in chunk_res.into_iter().enumerate() {
-                    results[base + offset] = res;
+                if let Ok(chunk_res) = handle.join() {
+                    for (offset, (base, res)) in chunk_res.into_iter().enumerate() {
+                        results[base + offset] = res;
+                    }
                 }
             }
         });
@@ -481,10 +488,10 @@ impl TurbineEngine {
             }
 
             for handle in handles {
-                let (start_idx, chunk_res) =
-                    handle.join().expect("Worker thread panicked in turbine");
-                for (offset, res) in chunk_res.into_iter().enumerate() {
-                    results[start_idx + offset] = res;
+                if let Ok((start_idx, chunk_res)) = handle.join() {
+                    for (offset, res) in chunk_res.into_iter().enumerate() {
+                        results[start_idx + offset] = res;
+                    }
                 }
             }
         });

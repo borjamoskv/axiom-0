@@ -12,7 +12,9 @@ use crate::ast::{Ast, AstError, Expr, ExprId, Level, Quantity};
 /// An untyped, erased runtime term stripped of all logical proofs and type annotations.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RuntimeTerm {
-    /// Erased proof marker or unit scalar.
+    /// Erased proof, type, or zero-quantity computational marker.
+    Erased,
+    /// Computational unit value `()`.
     Unit,
     /// Boolean primitive.
     Bool(bool),
@@ -49,15 +51,20 @@ pub enum RuntimeTerm {
 }
 
 impl RuntimeTerm {
-    /// Returns true if this term is an erased proof or unit value.
+    /// Returns true if this term is an erased proof or type marker.
     pub fn is_erased(&self) -> bool {
-        matches!(self, Self::Unit)
+        matches!(self, Self::Erased | Self::Unit)
+    }
+
+    /// Returns true if this term is strictly a non-computational erased proof/type (`RuntimeTerm::Erased`).
+    pub fn is_proof_erased(&self) -> bool {
+        matches!(self, Self::Erased)
     }
 
     /// Size in AST nodes of the erased runtime term.
     pub fn node_count(&self) -> usize {
         match self {
-            Self::Unit | Self::Bool(_) | Self::Nat(_) | Self::Var(_) => 1,
+            Self::Erased | Self::Unit | Self::Bool(_) | Self::Nat(_) | Self::Var(_) => 1,
             Self::Succ(b) | Self::Lam(b) | Self::Fst(b) | Self::Snd(b) => 1 + b.node_count(),
             Self::Closure(b, _) => 1 + b.node_count(),
             Self::App(f, a) | Self::Pair(f, a) => 1 + f.node_count() + a.node_count(),
@@ -73,16 +80,31 @@ impl RuntimeTerm {
 
 /// Erases proofs, types, and zero-quantity parameters from an elaborated AST.
 pub fn erase_expression(ast: &Ast, root: ExprId) -> Result<RuntimeTerm, AstError> {
-    erase_expr_rec(ast, root)
+    let mut level_map = Vec::new();
+    let mut runtime_depth = 0;
+    let term = erase_expr_rec(ast, root, &mut level_map, &mut runtime_depth)?;
+    Ok(normalize_erased_root(term))
 }
 
-fn erase_expr_rec(ast: &Ast, expr_id: ExprId) -> Result<RuntimeTerm, AstError> {
+fn normalize_erased_root(term: RuntimeTerm) -> RuntimeTerm {
+    match term {
+        RuntimeTerm::Erased => RuntimeTerm::Unit,
+        other => other,
+    }
+}
+
+fn erase_expr_rec(
+    ast: &Ast,
+    expr_id: ExprId,
+    level_map: &mut Vec<Option<usize>>,
+    runtime_depth: &mut usize,
+) -> Result<RuntimeTerm, AstError> {
     let expr = ast.expr(expr_id)?;
     match expr {
         // Types and proposition constructors are completely erased
-        Expr::Universe(_) | Expr::UnitType | Expr::NatType | Expr::Bool => Ok(RuntimeTerm::Unit),
-        Expr::IdType { .. } => Ok(RuntimeTerm::Unit),
-        Expr::Refl(_) => Ok(RuntimeTerm::Unit),
+        Expr::Universe(_) | Expr::UnitType | Expr::NatType | Expr::Bool => Ok(RuntimeTerm::Erased),
+        Expr::IdType { .. } => Ok(RuntimeTerm::Erased),
+        Expr::Refl(_) => Ok(RuntimeTerm::Erased),
 
         // Primitive values
         Expr::Unit => Ok(RuntimeTerm::Unit),
@@ -91,23 +113,34 @@ fn erase_expr_rec(ast: &Ast, expr_id: ExprId) -> Result<RuntimeTerm, AstError> {
         Expr::Zero => Ok(RuntimeTerm::Nat(0)),
 
         Expr::Succ(inner) => {
-            let erased_inner = erase_expr_rec(ast, inner)?;
+            let erased_inner = erase_expr_rec(ast, inner, level_map, runtime_depth)?;
             match erased_inner {
                 RuntimeTerm::Nat(n) => Ok(RuntimeTerm::Nat(n.saturating_add(1))),
                 other => Ok(RuntimeTerm::Succ(Box::new(other))),
             }
         }
 
-        Expr::Var(Level(lvl)) => Ok(RuntimeTerm::Var(lvl)),
+        Expr::Var(Level(lvl)) => {
+            if let Some(mapped) = level_map.get(lvl) {
+                match mapped {
+                    Some(rt_lvl) => Ok(RuntimeTerm::Var(*rt_lvl)),
+                    None => Ok(RuntimeTerm::Erased),
+                }
+            } else {
+                // Free variable from outer context: adjust by number of erased binders currently in scope
+                let erased_count = level_map.iter().filter(|m| m.is_none()).count();
+                Ok(RuntimeTerm::Var(lvl.saturating_sub(erased_count)))
+            }
+        }
 
         // Martin-Löf J-elimination: target is a proof (Q=0), so J definitionally collapses to base!
-        Expr::J { base, .. } => erase_expr_rec(ast, base),
+        Expr::J { base, .. } => erase_expr_rec(ast, base, level_map, runtime_depth),
 
         // Inductive recursion on Peano
         Expr::Ind { z, s, target, .. } => {
-            let base = erase_expr_rec(ast, z)?;
-            let step = erase_expr_rec(ast, s)?;
-            let tgt = erase_expr_rec(ast, target)?;
+            let base = erase_expr_rec(ast, z, level_map, runtime_depth)?;
+            let step = erase_expr_rec(ast, s, level_map, runtime_depth)?;
+            let tgt = erase_expr_rec(ast, target, level_map, runtime_depth)?;
             Ok(RuntimeTerm::NatRec {
                 base: Box::new(base),
                 step: Box::new(step),
@@ -117,19 +150,22 @@ fn erase_expr_rec(ast: &Ast, expr_id: ExprId) -> Result<RuntimeTerm, AstError> {
 
         // Dependent Pairs: If one component is erased (e.g. proof of predicate), unbox to scalar!
         Expr::Pair { first, second } => {
-            let e1 = erase_expr_rec(ast, first)?;
-            let e2 = erase_expr_rec(ast, second)?;
-            if e2.is_erased() {
+            let e1 = erase_expr_rec(ast, first, level_map, runtime_depth)?;
+            let e2 = erase_expr_rec(ast, second, level_map, runtime_depth)?;
+            if e2.is_proof_erased() {
                 Ok(e1)
-            } else if e1.is_erased() {
+            } else if e1.is_proof_erased() {
                 Ok(e2)
             } else {
-                Ok(RuntimeTerm::Pair(Box::new(e1), Box::new(e2)))
+                Ok(RuntimeTerm::Pair(
+                    Box::new(normalize_erased_root(e1)),
+                    Box::new(normalize_erased_root(e2)),
+                ))
             }
         }
 
         Expr::Fst(pair) => {
-            let p = erase_expr_rec(ast, pair)?;
+            let p = erase_expr_rec(ast, pair, level_map, runtime_depth)?;
             match p {
                 // If it was already unboxed due to second component being erased:
                 RuntimeTerm::Pair(first, _) => Ok(*first),
@@ -138,7 +174,7 @@ fn erase_expr_rec(ast: &Ast, expr_id: ExprId) -> Result<RuntimeTerm, AstError> {
         }
 
         Expr::Snd(pair) => {
-            let p = erase_expr_rec(ast, pair)?;
+            let p = erase_expr_rec(ast, pair, level_map, runtime_depth)?;
             match p {
                 RuntimeTerm::Pair(_, second) => Ok(*second),
                 other => Ok(other),
@@ -146,50 +182,61 @@ fn erase_expr_rec(ast: &Ast, expr_id: ExprId) -> Result<RuntimeTerm, AstError> {
         }
 
         // Functions and Applications
-        Expr::Pi { .. } => Ok(RuntimeTerm::Unit),
+        Expr::Pi { .. } => Ok(RuntimeTerm::Erased),
 
         Expr::Lambda { quantity, body, .. } => {
-            let erased_body = erase_expr_rec(ast, body)?;
             if quantity == Quantity::Zero {
-                // Parameter is erased: eliminate lambda binder entirely
+                // Parameter is erased: eliminate lambda binder and map this De Bruijn level to None
+                level_map.push(None);
+                let erased_body = erase_expr_rec(ast, body, level_map, runtime_depth)?;
+                level_map.pop();
                 Ok(erased_body)
             } else {
-                Ok(RuntimeTerm::Lam(Box::new(erased_body)))
+                let rt_lvl = *runtime_depth;
+                *runtime_depth += 1;
+                level_map.push(Some(rt_lvl));
+                let erased_body = erase_expr_rec(ast, body, level_map, runtime_depth)?;
+                level_map.pop();
+                *runtime_depth -= 1;
+                Ok(RuntimeTerm::Lam(Box::new(normalize_erased_root(erased_body))))
             }
         }
 
         Expr::App { function, argument, .. } => {
-            let f = erase_expr_rec(ast, function)?;
-            let a = erase_expr_rec(ast, argument)?;
-            if a.is_erased() {
+            let f = erase_expr_rec(ast, function, level_map, runtime_depth)?;
+            let a = erase_expr_rec(ast, argument, level_map, runtime_depth)?;
+            if a.is_proof_erased() {
                 // Erased argument: function already eliminated binder, application is a no-op
                 Ok(f)
             } else {
-                Ok(RuntimeTerm::App(Box::new(f), Box::new(a)))
+                Ok(RuntimeTerm::App(
+                    Box::new(normalize_erased_root(f)),
+                    Box::new(normalize_erased_root(a)),
+                ))
             }
         }
 
         Expr::If { cond, conseq, alt } => {
-            let c = erase_expr_rec(ast, cond)?;
-            let t = erase_expr_rec(ast, conseq)?;
-            let e = erase_expr_rec(ast, alt)?;
+            let c = erase_expr_rec(ast, cond, level_map, runtime_depth)?;
+            let t = erase_expr_rec(ast, conseq, level_map, runtime_depth)?;
+            let e = erase_expr_rec(ast, alt, level_map, runtime_depth)?;
             Ok(RuntimeTerm::If {
-                cond: Box::new(c),
-                conseq: Box::new(t),
-                alt: Box::new(e),
+                cond: Box::new(normalize_erased_root(c)),
+                conseq: Box::new(normalize_erased_root(t)),
+                alt: Box::new(normalize_erased_root(e)),
             })
         }
 
-        Expr::Hole | Expr::Meta(_) => Ok(RuntimeTerm::Unit),
-        Expr::Sigma { .. } => Ok(RuntimeTerm::Unit),
-        Expr::Ann { term, .. } => erase_expr_rec(ast, term),
+        Expr::Hole | Expr::Meta(_) => Ok(RuntimeTerm::Erased),
+        Expr::Sigma { .. } => Ok(RuntimeTerm::Erased),
+        Expr::Ann { term, .. } => erase_expr_rec(ast, term, level_map, runtime_depth),
     }
 }
 
 /// Evaluates an erased `RuntimeTerm` at bare-metal execution speed without typechecking or closures.
 pub fn eval_runtime(term: &RuntimeTerm, env: &[RuntimeTerm]) -> RuntimeTerm {
     match term {
-        RuntimeTerm::Unit => RuntimeTerm::Unit,
+        RuntimeTerm::Erased | RuntimeTerm::Unit => RuntimeTerm::Unit,
         RuntimeTerm::Bool(b) => RuntimeTerm::Bool(*b),
         RuntimeTerm::Nat(n) => RuntimeTerm::Nat(*n),
 

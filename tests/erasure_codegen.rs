@@ -126,3 +126,30 @@ fn test_erasure_c_code_emission() {
     assert!(c_code.contains("2ULL"));
     assert!(c_code.contains("0ULL"));
 }
+
+#[test]
+fn test_erasure_reindexes_de_bruijn_levels_after_erased_binder() {
+    let mut ast = Ast::new();
+    // Polymorphic identity applied to Nat and S(S(Z)): (fn :^0 A -> fn :^1 x -> x) Nat S(S(Z))
+    let term = parse(&mut ast, "(fn :^0 A -> fn :^1 x -> x) Nat S(S(Z))", &[]);
+    let erased = erase_expression(&ast, term).unwrap();
+    // After erasing :^0 A and type argument Nat, the inner binder `x` must be Var(0), not Var(1)
+    assert_eq!(
+        erased,
+        RuntimeTerm::App(
+            Box::new(RuntimeTerm::Lam(Box::new(RuntimeTerm::Var(0)))),
+            Box::new(RuntimeTerm::Nat(2)),
+        )
+    );
+    assert_eq!(eval_runtime(&erased, &[]), RuntimeTerm::Nat(2));
+}
+
+#[test]
+fn test_erasure_preserves_computational_unit_application() {
+    let mut ast = Ast::new();
+    // Computational function taking Unit `()` and returning S(Z)
+    let term = parse(&mut ast, "(fn :^1 u -> S(Z)) ()", &[]);
+    let erased = erase_expression(&ast, term).unwrap();
+    assert_eq!(eval_runtime(&erased, &[]), RuntimeTerm::Nat(1));
+}
+
