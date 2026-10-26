@@ -8,6 +8,7 @@
 //! 5. Emits pure C99 code for zero-cost foreign function interfacing (C-ABI).
 
 use crate::ast::{Ast, AstError, Expr, ExprId, Level, Quantity};
+use alloc::{boxed::Box, vec::Vec};
 
 /// An untyped, erased runtime term stripped of all logical proofs and type annotations.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -82,7 +83,16 @@ impl RuntimeTerm {
 pub fn erase_expression(ast: &Ast, root: ExprId) -> Result<RuntimeTerm, AstError> {
     let mut level_map = Vec::new();
     let mut runtime_depth = 0;
-    let term = erase_expr_rec(ast, root, &mut level_map, &mut runtime_depth)?;
+    let mut ty_env = Vec::new();
+    let mut val_env = Vec::new();
+    let term = erase_expr_rec(
+        ast,
+        root,
+        &mut level_map,
+        &mut runtime_depth,
+        &mut ty_env,
+        &mut val_env,
+    )?;
     Ok(normalize_erased_root(term))
 }
 
@@ -93,11 +103,251 @@ fn normalize_erased_root(term: RuntimeTerm) -> RuntimeTerm {
     }
 }
 
+/// Whether inhabitants of this type are erased (types themselves or equality proofs).
+/// Values of Nat, Bool, Unit, Pi and Sigma types remain computational.
+fn is_type_or_proof_value(val: &crate::eval::Value) -> bool {
+    use crate::eval::Value;
+    matches!(val, Value::Universe(_) | Value::IdType(..))
+}
+
+/// Extracts the domain type (`Value`) of a lambda binder if known from an enclosing `Pi` type.
+fn extract_pi_domain_and_codomain(
+    ast: &Ast,
+    expected_ty: Option<&crate::eval::Value>,
+    depth: usize,
+) -> (Option<crate::eval::Value>, Option<crate::eval::Value>) {
+    if let Some(crate::eval::Value::Pi(_plic, _q, dom, cod)) = expected_ty {
+        let var = crate::eval::Value::Neutral(crate::eval::Neutral::Var(Level(depth)));
+        let cod_val = cod.clone().instantiate(ast, var, None);
+        (Some((**dom).clone()), Some(cod_val))
+    } else {
+        (None, None)
+    }
+}
+
+/// Infers the semantic type (`Value`) of `expr_id` if possible in the current erasure context.
+fn infer_expr_type_in_context(
+    ast: &Ast,
+    expr_id: ExprId,
+    ty_env: &[Option<crate::eval::Value>],
+    val_env: &[crate::eval::Value],
+) -> Result<Option<crate::eval::Value>, AstError> {
+    match ast.expr(expr_id)? {
+        Expr::Var(Level(lvl)) => Ok(ty_env.get(lvl).cloned().flatten()),
+        Expr::Ann { ty, .. } => Ok(Some(crate::eval::eval(ast, ty, val_env, None))),
+        Expr::Fst(pair) => {
+            if let Some(crate::eval::Value::Sigma(_q, dom, _cod)) =
+                infer_expr_type_in_context(ast, pair, ty_env, val_env)?
+            {
+                Ok(Some(*dom))
+            } else {
+                Ok(None)
+            }
+        }
+        Expr::Snd(pair) => {
+            if let Some(crate::eval::Value::Sigma(_q, _dom, cod)) =
+                infer_expr_type_in_context(ast, pair, ty_env, val_env)?
+            {
+                let pair_val = crate::eval::eval(ast, pair, val_env, None);
+                let fst_val = match pair_val {
+                    crate::eval::Value::Pair(f, _) => *f,
+                    crate::eval::Value::Neutral(n) => {
+                        crate::eval::Value::Neutral(crate::eval::Neutral::Fst(Box::new(n)))
+                    }
+                    other => other,
+                };
+                Ok(Some(cod.instantiate(ast, fst_val, None)))
+            } else {
+                Ok(None)
+            }
+        }
+        Expr::App {
+            function, argument, ..
+        } => {
+            if let Some(crate::eval::Value::Pi(_plic, _q, _dom, cod)) =
+                infer_expr_type_in_context(ast, function, ty_env, val_env)?
+            {
+                let arg_val = crate::eval::eval(ast, argument, val_env, None);
+                Ok(Some(cod.instantiate(ast, arg_val, None)))
+            } else {
+                Ok(None)
+            }
+        }
+        Expr::If { conseq, alt, .. } => {
+            if let Some(t) = infer_expr_type_in_context(ast, conseq, ty_env, val_env)? {
+                Ok(Some(t))
+            } else {
+                infer_expr_type_in_context(ast, alt, ty_env, val_env)
+            }
+        }
+        Expr::Ind { mot, target, .. } => {
+            let mot_val = crate::eval::eval(ast, mot, val_env, None);
+            let tgt_val = crate::eval::eval(ast, target, val_env, None);
+            Ok(Some(crate::eval::apply(
+                ast,
+                crate::ast::Plicity::Explicit,
+                mot_val,
+                tgt_val,
+                None,
+            )))
+        }
+        Expr::J { base, .. } => infer_expr_type_in_context(ast, base, ty_env, val_env),
+        _ => {
+            let types: Vec<crate::eval::Value> = ty_env
+                .iter()
+                .map(|t| t.clone().unwrap_or(crate::eval::Value::Universe(0)))
+                .collect();
+            if let Ok(elab) = crate::elaborator::synthesize_in_env(ast, expr_id, val_env, &types) {
+                Ok(Some(elab.ty))
+            } else {
+                Ok(None)
+            }
+        }
+    }
+}
+
+/// Infers the sequence of parameter quantities (`Quantity`) for a function expression `expr_id`
+/// using context types, annotations, or syntactic binders.
+fn infer_function_param_quantities(
+    ast: &Ast,
+    mut expr_id: ExprId,
+    ty_env: &[Option<crate::eval::Value>],
+    val_env: &[crate::eval::Value],
+) -> Result<Vec<Quantity>, AstError> {
+    if let Some(mut ty) = infer_expr_type_in_context(ast, expr_id, ty_env, val_env)? {
+        let mut quantities = Vec::new();
+        while let crate::eval::Value::Pi(_plic, q, _dom, cod) = ty {
+            quantities.push(q);
+            let var = crate::eval::Value::Neutral(crate::eval::Neutral::Var(Level(
+                val_env.len() + quantities.len(),
+            )));
+            ty = cod.instantiate(ast, var, None);
+        }
+        if !quantities.is_empty() {
+            return Ok(quantities);
+        }
+    }
+
+    let mut quantities = Vec::new();
+    loop {
+        match ast.expr(expr_id)? {
+            Expr::Ann { term, ty } => {
+                let mut cur_ty = ty;
+                while let Ok(Expr::Pi {
+                    quantity, codomain, ..
+                }) = ast.expr(cur_ty)
+                {
+                    quantities.push(quantity);
+                    cur_ty = codomain;
+                }
+                if !quantities.is_empty() {
+                    return Ok(quantities);
+                }
+                expr_id = term;
+            }
+            Expr::Lambda { quantity, body, .. } => {
+                quantities.push(quantity);
+                expr_id = body;
+            }
+            Expr::App { function, .. } => {
+                let mut inner = infer_function_param_quantities(ast, function, ty_env, val_env)?;
+                if !inner.is_empty() {
+                    inner.remove(0);
+                }
+                return Ok(inner);
+            }
+            _ => return Ok(quantities),
+        }
+    }
+}
+
+/// Determines whether a pair expression has its first or second component erased
+/// (`(first_erased, second_erased)`), using context types, annotations, or literal structure.
+fn pair_component_erasure(
+    ast: &Ast,
+    mut expr_id: ExprId,
+    level_map: &mut Vec<Option<usize>>,
+    runtime_depth: &mut usize,
+    ty_env: &mut Vec<Option<crate::eval::Value>>,
+    val_env: &mut Vec<crate::eval::Value>,
+) -> Result<(bool, bool), AstError> {
+    if let Some(crate::eval::Value::Sigma(q, dom, cod)) =
+        infer_expr_type_in_context(ast, expr_id, ty_env, val_env)?
+    {
+        let var = crate::eval::Value::Neutral(crate::eval::Neutral::Var(Level(val_env.len())));
+        let cod_val = cod.instantiate(ast, var, None);
+        let first_erased = q == Quantity::Zero || is_type_or_proof_value(&dom);
+        let second_erased = is_type_or_proof_value(&cod_val);
+        return Ok((first_erased, second_erased));
+    }
+
+    loop {
+        match ast.expr(expr_id)? {
+            Expr::Ann { term, ty } => {
+                if let Ok(Expr::Sigma {
+                    quantity,
+                    domain,
+                    codomain,
+                }) = ast.expr(ty)
+                {
+                    let dom_erased = quantity == Quantity::Zero
+                        || matches!(
+                            ast.expr(domain)?,
+                            Expr::Universe(_)
+                                | Expr::IdType { .. }
+                                | Expr::Pi { .. }
+                                | Expr::Sigma { .. }
+                        );
+                    let cod_erased = matches!(
+                        ast.expr(codomain)?,
+                        Expr::Universe(_)
+                            | Expr::IdType { .. }
+                            | Expr::Pi { .. }
+                            | Expr::Sigma { .. }
+                    );
+                    if dom_erased || cod_erased {
+                        return Ok((dom_erased, cod_erased));
+                    }
+                }
+                expr_id = term;
+            }
+            Expr::Pair { first, second } => {
+                let e1 = erase_expr_rec(ast, first, level_map, runtime_depth, ty_env, val_env)?;
+                let e2 = erase_expr_rec(ast, second, level_map, runtime_depth, ty_env, val_env)?;
+                return Ok((e1.is_proof_erased(), e2.is_proof_erased()));
+            }
+            _ => return Ok((false, false)),
+        }
+    }
+}
+
 fn erase_expr_rec(
     ast: &Ast,
     expr_id: ExprId,
     level_map: &mut Vec<Option<usize>>,
     runtime_depth: &mut usize,
+    ty_env: &mut Vec<Option<crate::eval::Value>>,
+    val_env: &mut Vec<crate::eval::Value>,
+) -> Result<RuntimeTerm, AstError> {
+    erase_expr_rec_typed(
+        ast,
+        expr_id,
+        None,
+        level_map,
+        runtime_depth,
+        ty_env,
+        val_env,
+    )
+}
+
+fn erase_expr_rec_typed(
+    ast: &Ast,
+    expr_id: ExprId,
+    expected_ty: Option<&crate::eval::Value>,
+    level_map: &mut Vec<Option<usize>>,
+    runtime_depth: &mut usize,
+    ty_env: &mut Vec<Option<crate::eval::Value>>,
+    val_env: &mut Vec<crate::eval::Value>,
 ) -> Result<RuntimeTerm, AstError> {
     let expr = ast.expr(expr_id)?;
     match expr {
@@ -113,7 +363,8 @@ fn erase_expr_rec(
         Expr::Zero => Ok(RuntimeTerm::Nat(0)),
 
         Expr::Succ(inner) => {
-            let erased_inner = erase_expr_rec(ast, inner, level_map, runtime_depth)?;
+            let erased_inner =
+                erase_expr_rec(ast, inner, level_map, runtime_depth, ty_env, val_env)?;
             match erased_inner {
                 RuntimeTerm::Nat(n) => Ok(RuntimeTerm::Nat(n.saturating_add(1))),
                 other => Ok(RuntimeTerm::Succ(Box::new(other))),
@@ -121,6 +372,11 @@ fn erase_expr_rec(
         }
 
         Expr::Var(Level(lvl)) => {
+            if let Some(Some(ty)) = ty_env.get(lvl) {
+                if is_type_or_proof_value(ty) {
+                    return Ok(RuntimeTerm::Erased);
+                }
+            }
             if let Some(mapped) = level_map.get(lvl) {
                 match mapped {
                     Some(rt_lvl) => Ok(RuntimeTerm::Var(*rt_lvl)),
@@ -134,27 +390,160 @@ fn erase_expr_rec(
         }
 
         // Martin-Löf J-elimination: target is a proof (Q=0), so J definitionally collapses to base!
-        Expr::J { base, .. } => erase_expr_rec(ast, base, level_map, runtime_depth),
+        Expr::J { base, .. } => erase_expr_rec_typed(
+            ast,
+            base,
+            expected_ty,
+            level_map,
+            runtime_depth,
+            ty_env,
+            val_env,
+        ),
 
         // Inductive recursion on Peano
-        Expr::Ind { z, s, target, .. } => {
-            let base = erase_expr_rec(ast, z, level_map, runtime_depth)?;
-            let step = erase_expr_rec(ast, s, level_map, runtime_depth)?;
-            let tgt = erase_expr_rec(ast, target, level_map, runtime_depth)?;
+        Expr::Ind {
+            mot, z, s, target, ..
+        } => {
+            let mot_val = crate::eval::eval(ast, mot, val_env, None);
+            let z_ty = crate::eval::apply(
+                ast,
+                crate::ast::Plicity::Explicit,
+                mot_val.clone(),
+                crate::eval::Value::Zero,
+                None,
+            );
+            let base = erase_expr_rec_typed(
+                ast,
+                z,
+                Some(&z_ty),
+                level_map,
+                runtime_depth,
+                ty_env,
+                val_env,
+            )?;
+            // In `NatRec`, the runtime evaluator applies `step` to `(i, acc)`.
+            // Even if the step binder `n` or `ih` was declared with `Q = 0` (unused in step body),
+            // both runtime binders must be retained so `step(i)(acc)` has two lambdas to beta-reduce.
+            let step = match ast.expr(s)? {
+                Expr::Lambda { body: s_body1, .. } => {
+                    let depth_n = val_env.len();
+                    let var_n =
+                        crate::eval::Value::Neutral(crate::eval::Neutral::Var(Level(depth_n)));
+                    let rt_n = *runtime_depth;
+                    *runtime_depth += 1;
+                    level_map.push(Some(rt_n));
+                    ty_env.push(Some(crate::eval::Value::NatType));
+                    val_env.push(var_n.clone());
+
+                    let inner = match ast.expr(s_body1)? {
+                        Expr::Lambda { body: s_body2, .. } => {
+                            let depth_ih = val_env.len();
+                            let var_ih = crate::eval::Value::Neutral(crate::eval::Neutral::Var(
+                                Level(depth_ih),
+                            ));
+                            let mot_n = crate::eval::apply(
+                                ast,
+                                crate::ast::Plicity::Explicit,
+                                mot_val.clone(),
+                                var_n.clone(),
+                                None,
+                            );
+                            let mot_succ_n = crate::eval::apply(
+                                ast,
+                                crate::ast::Plicity::Explicit,
+                                mot_val,
+                                crate::eval::Value::Succ(Box::new(var_n)),
+                                None,
+                            );
+                            let rt_ih = *runtime_depth;
+                            *runtime_depth += 1;
+                            level_map.push(Some(rt_ih));
+                            ty_env.push(Some(mot_n));
+                            val_env.push(var_ih);
+
+                            let body_erased = erase_expr_rec_typed(
+                                ast,
+                                s_body2,
+                                Some(&mot_succ_n),
+                                level_map,
+                                runtime_depth,
+                                ty_env,
+                                val_env,
+                            )?;
+                            val_env.pop();
+                            ty_env.pop();
+                            level_map.pop();
+                            *runtime_depth -= 1;
+                            RuntimeTerm::Lam(Box::new(normalize_erased_root(body_erased)))
+                        }
+                        _ => {
+                            erase_expr_rec(ast, s_body1, level_map, runtime_depth, ty_env, val_env)?
+                        }
+                    };
+                    val_env.pop();
+                    ty_env.pop();
+                    level_map.pop();
+                    *runtime_depth -= 1;
+                    RuntimeTerm::Lam(Box::new(normalize_erased_root(inner)))
+                }
+                _ => erase_expr_rec(ast, s, level_map, runtime_depth, ty_env, val_env)?,
+            };
+            let tgt = erase_expr_rec_typed(
+                ast,
+                target,
+                Some(&crate::eval::Value::NatType),
+                level_map,
+                runtime_depth,
+                ty_env,
+                val_env,
+            )?;
             Ok(RuntimeTerm::NatRec {
-                base: Box::new(base),
-                step: Box::new(step),
-                target: Box::new(tgt),
+                base: Box::new(normalize_erased_root(base)),
+                step: Box::new(normalize_erased_root(step)),
+                target: Box::new(normalize_erased_root(tgt)),
             })
         }
 
-        // Dependent Pairs: If one component is erased (e.g. proof of predicate), unbox to scalar!
+        // Dependent Pairs: If one component is erased (e.g. proof of predicate or Q=0), unbox to scalar!
         Expr::Pair { first, second } => {
-            let e1 = erase_expr_rec(ast, first, level_map, runtime_depth)?;
-            let e2 = erase_expr_rec(ast, second, level_map, runtime_depth)?;
-            if e2.is_proof_erased() {
+            let (sigma_q, dom_ty, cod_ty) =
+                if let Some(crate::eval::Value::Sigma(q, dom, cod)) = expected_ty {
+                    let fst_val = crate::eval::eval(ast, first, val_env, None);
+                    let cod_val = cod.clone().instantiate(ast, fst_val, None);
+                    (Some(*q), Some((**dom).clone()), Some(cod_val))
+                } else {
+                    (None, None, None)
+                };
+
+            let e1 = erase_expr_rec_typed(
+                ast,
+                first,
+                dom_ty.as_ref(),
+                level_map,
+                runtime_depth,
+                ty_env,
+                val_env,
+            )?;
+            let e2 = erase_expr_rec_typed(
+                ast,
+                second,
+                cod_ty.as_ref(),
+                level_map,
+                runtime_depth,
+                ty_env,
+                val_env,
+            )?;
+            let first_erased = sigma_q == Some(Quantity::Zero)
+                || e1.is_proof_erased()
+                || dom_ty.as_ref().is_some_and(is_type_or_proof_value);
+            let second_erased =
+                e2.is_proof_erased() || cod_ty.as_ref().is_some_and(is_type_or_proof_value);
+
+            if first_erased && second_erased {
+                Ok(RuntimeTerm::Erased)
+            } else if second_erased {
                 Ok(e1)
-            } else if e1.is_proof_erased() {
+            } else if first_erased {
                 Ok(e2)
             } else {
                 Ok(RuntimeTerm::Pair(
@@ -165,19 +554,50 @@ fn erase_expr_rec(
         }
 
         Expr::Fst(pair) => {
-            let p = erase_expr_rec(ast, pair, level_map, runtime_depth)?;
+            let p = erase_expr_rec(ast, pair, level_map, runtime_depth, ty_env, val_env)?;
             match p {
-                // If it was already unboxed due to second component being erased:
                 RuntimeTerm::Pair(first, _) => Ok(*first),
-                other => Ok(other),
+                other => {
+                    let (first_erased, second_erased) = pair_component_erasure(
+                        ast,
+                        pair,
+                        level_map,
+                        runtime_depth,
+                        ty_env,
+                        val_env,
+                    )?;
+                    if first_erased {
+                        Ok(RuntimeTerm::Erased)
+                    } else if second_erased {
+                        Ok(other)
+                    } else {
+                        Ok(RuntimeTerm::Fst(Box::new(normalize_erased_root(other))))
+                    }
+                }
             }
         }
 
         Expr::Snd(pair) => {
-            let p = erase_expr_rec(ast, pair, level_map, runtime_depth)?;
+            let p = erase_expr_rec(ast, pair, level_map, runtime_depth, ty_env, val_env)?;
             match p {
                 RuntimeTerm::Pair(_, second) => Ok(*second),
-                other => Ok(other),
+                other => {
+                    let (first_erased, second_erased) = pair_component_erasure(
+                        ast,
+                        pair,
+                        level_map,
+                        runtime_depth,
+                        ty_env,
+                        val_env,
+                    )?;
+                    if second_erased {
+                        Ok(RuntimeTerm::Erased)
+                    } else if first_erased {
+                        Ok(other)
+                    } else {
+                        Ok(RuntimeTerm::Snd(Box::new(normalize_erased_root(other))))
+                    }
+                }
             }
         }
 
@@ -185,27 +605,84 @@ fn erase_expr_rec(
         Expr::Pi { .. } => Ok(RuntimeTerm::Erased),
 
         Expr::Lambda { quantity, body, .. } => {
-            if quantity == Quantity::Zero {
+            let cur_depth = val_env.len();
+            let (dom_ty, cod_ty) = extract_pi_domain_and_codomain(ast, expected_ty, cur_depth);
+            let erase_binder =
+                quantity == Quantity::Zero || dom_ty.as_ref().is_some_and(is_type_or_proof_value);
+            let var = crate::eval::Value::Neutral(crate::eval::Neutral::Var(Level(cur_depth)));
+            ty_env.push(dom_ty);
+            val_env.push(var);
+
+            if erase_binder {
                 // Parameter is erased: eliminate lambda binder and map this De Bruijn level to None
                 level_map.push(None);
-                let erased_body = erase_expr_rec(ast, body, level_map, runtime_depth)?;
+                let erased_body = erase_expr_rec_typed(
+                    ast,
+                    body,
+                    cod_ty.as_ref(),
+                    level_map,
+                    runtime_depth,
+                    ty_env,
+                    val_env,
+                )?;
                 level_map.pop();
+                val_env.pop();
+                ty_env.pop();
                 Ok(erased_body)
             } else {
                 let rt_lvl = *runtime_depth;
                 *runtime_depth += 1;
                 level_map.push(Some(rt_lvl));
-                let erased_body = erase_expr_rec(ast, body, level_map, runtime_depth)?;
+                let erased_body = erase_expr_rec_typed(
+                    ast,
+                    body,
+                    cod_ty.as_ref(),
+                    level_map,
+                    runtime_depth,
+                    ty_env,
+                    val_env,
+                )?;
                 level_map.pop();
                 *runtime_depth -= 1;
-                Ok(RuntimeTerm::Lam(Box::new(normalize_erased_root(erased_body))))
+                val_env.pop();
+                ty_env.pop();
+                Ok(RuntimeTerm::Lam(Box::new(normalize_erased_root(
+                    erased_body,
+                ))))
             }
         }
 
-        Expr::App { function, argument, .. } => {
-            let f = erase_expr_rec(ast, function, level_map, runtime_depth)?;
-            let a = erase_expr_rec(ast, argument, level_map, runtime_depth)?;
-            if a.is_proof_erased() {
+        Expr::App {
+            function, argument, ..
+        } => {
+            let fn_ty = infer_expr_type_in_context(ast, function, ty_env, val_env)?;
+            let arg_expected_ty = if let Some(crate::eval::Value::Pi(_plic, _q, ref dom, _)) = fn_ty
+            {
+                Some((**dom).clone())
+            } else {
+                None
+            };
+            let param_quantities = infer_function_param_quantities(ast, function, ty_env, val_env)?;
+            let param_is_zero = param_quantities.first().copied() == Some(Quantity::Zero);
+            let f = erase_expr_rec_typed(
+                ast,
+                function,
+                fn_ty.as_ref(),
+                level_map,
+                runtime_depth,
+                ty_env,
+                val_env,
+            )?;
+            let a = erase_expr_rec_typed(
+                ast,
+                argument,
+                arg_expected_ty.as_ref(),
+                level_map,
+                runtime_depth,
+                ty_env,
+                val_env,
+            )?;
+            if param_is_zero || arg_expected_ty.as_ref().is_some_and(is_type_or_proof_value) {
                 // Erased argument: function already eliminated binder, application is a no-op
                 Ok(f)
             } else {
@@ -217,9 +694,33 @@ fn erase_expr_rec(
         }
 
         Expr::If { cond, conseq, alt } => {
-            let c = erase_expr_rec(ast, cond, level_map, runtime_depth)?;
-            let t = erase_expr_rec(ast, conseq, level_map, runtime_depth)?;
-            let e = erase_expr_rec(ast, alt, level_map, runtime_depth)?;
+            let c = erase_expr_rec_typed(
+                ast,
+                cond,
+                Some(&crate::eval::Value::Bool),
+                level_map,
+                runtime_depth,
+                ty_env,
+                val_env,
+            )?;
+            let t = erase_expr_rec_typed(
+                ast,
+                conseq,
+                expected_ty,
+                level_map,
+                runtime_depth,
+                ty_env,
+                val_env,
+            )?;
+            let e = erase_expr_rec_typed(
+                ast,
+                alt,
+                expected_ty,
+                level_map,
+                runtime_depth,
+                ty_env,
+                val_env,
+            )?;
             Ok(RuntimeTerm::If {
                 cond: Box::new(normalize_erased_root(c)),
                 conseq: Box::new(normalize_erased_root(t)),
@@ -229,7 +730,18 @@ fn erase_expr_rec(
 
         Expr::Hole | Expr::Meta(_) => Ok(RuntimeTerm::Erased),
         Expr::Sigma { .. } => Ok(RuntimeTerm::Erased),
-        Expr::Ann { term, .. } => erase_expr_rec(ast, term, level_map, runtime_depth),
+        Expr::Ann { term, ty } => {
+            let ann_ty = crate::eval::eval(ast, ty, val_env, None);
+            erase_expr_rec_typed(
+                ast,
+                term,
+                Some(&ann_ty),
+                level_map,
+                runtime_depth,
+                ty_env,
+                val_env,
+            )
+        }
     }
 }
 
@@ -256,13 +768,9 @@ pub fn eval_runtime(term: &RuntimeTerm, env: &[RuntimeTerm]) -> RuntimeTerm {
             }
         }
 
-        RuntimeTerm::Lam(body) => {
-            RuntimeTerm::Closure(body.clone(), env.to_vec())
-        }
+        RuntimeTerm::Lam(body) => RuntimeTerm::Closure(body.clone(), env.to_vec()),
 
-        RuntimeTerm::Closure(body, c_env) => {
-            RuntimeTerm::Closure(body.clone(), c_env.clone())
-        }
+        RuntimeTerm::Closure(body, c_env) => RuntimeTerm::Closure(body.clone(), c_env.clone()),
 
         RuntimeTerm::App(func, arg) => {
             let eval_f = eval_runtime(func, env);
@@ -331,10 +839,7 @@ pub fn eval_runtime(term: &RuntimeTerm, env: &[RuntimeTerm]) -> RuntimeTerm {
                             ),
                             env,
                         );
-                        acc = eval_runtime(
-                            &RuntimeTerm::App(Box::new(step_i), Box::new(acc)),
-                            env,
-                        );
+                        acc = eval_runtime(&RuntimeTerm::App(Box::new(step_i), Box::new(acc)), env);
                     }
                     acc
                 }
@@ -348,46 +853,8 @@ pub fn eval_runtime(term: &RuntimeTerm, env: &[RuntimeTerm]) -> RuntimeTerm {
     }
 }
 
-/// Emits zero-cost standalone C99 code for a verified runtime term.
-pub fn emit_c_code(term: &RuntimeTerm, fn_name: &str) -> String {
-    let mut out = String::new();
-    out.push_str("// Auto-generated by AXIOM-0 QTT Proof Erasure Engine\n");
-    out.push_str("// Verified with Martin-Löf Id-types, proofs completely eradicated.\n");
-    out.push_str("#include <stdint.h>\n#include <stdbool.h>\n\n");
+mod codegen;
+pub use codegen::{CodegenError, emit_c_code, try_emit_c_code};
 
-    match term {
-        RuntimeTerm::Nat(n) => {
-            out.push_str(&format!("uint64_t {}() {{\n    return {}ULL;\n}}\n", fn_name, n));
-        }
-        RuntimeTerm::Bool(b) => {
-            out.push_str(&format!("bool {}() {{\n    return {};\n}}\n", fn_name, if *b { "true" } else { "false" }));
-        }
-        RuntimeTerm::If { cond, conseq, alt } => {
-            out.push_str(&format!("uint64_t {}() {{\n", fn_name));
-            out.push_str(&format!("    return ({}) ? ({}) : ({});\n}}\n", 
-                emit_c_inline(cond), emit_c_inline(conseq), emit_c_inline(alt)));
-        }
-        _ => {
-            out.push_str(&format!("uint64_t {}() {{\n    return {};\n}}\n", fn_name, emit_c_inline(term)));
-        }
-    }
-    out
-}
-
-fn emit_c_inline(term: &RuntimeTerm) -> String {
-    match term {
-        RuntimeTerm::Unit => "0".to_string(),
-        RuntimeTerm::Bool(b) => (if *b { "true" } else { "false" }).to_string(),
-        RuntimeTerm::Nat(n) => format!("{}ULL", n),
-        RuntimeTerm::Succ(x) => format!("({} + 1ULL)", emit_c_inline(x)),
-        RuntimeTerm::Var(lvl) => format!("x_{}", lvl),
-        RuntimeTerm::If { cond, conseq, alt } => {
-            format!("(({}) ? ({}) : ({}))", emit_c_inline(cond), emit_c_inline(conseq), emit_c_inline(alt))
-        }
-        RuntimeTerm::App(f, a) => format!("{}({})", emit_c_inline(f), emit_c_inline(a)),
-        RuntimeTerm::Pair(a, _b) => format!("((uint64_t){})", emit_c_inline(a)),
-        RuntimeTerm::Fst(p) => emit_c_inline(p),
-        RuntimeTerm::Snd(p) => emit_c_inline(p),
-        _ => "0ULL".to_string(),
-    }
-}
+#[cfg(test)]
+mod tests;

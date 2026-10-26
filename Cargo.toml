@@ -13,6 +13,57 @@ path = "src/lib.rs"
 [[bin]]
 name = "micro-axiom-0"
 path = "src/main.rs"
+required-features = ["std"]
+
+[features]
+default = ["std"]
+std = []
+
+# Hosted test harnesses exercise metavariable inference and worker batches.
+[[test]]
+name = "centuria_100_invariants"
+required-features = ["std"]
+
+[[test]]
+name = "implicits"
+required-features = ["std"]
+
+[[test]]
+name = "stress"
+required-features = ["std"]
+
+[[test]]
+name = "turbine_concurrent"
+required-features = ["std"]
+
+[[test]]
+name = "unification"
+required-features = ["std"]
+
+# Examples are hosted command-line programs.
+[[example]]
+name = "poc_sigma_bool"
+required-features = ["std"]
+
+[[example]]
+name = "snapshot"
+required-features = ["std"]
+
+[[example]]
+name = "stress_10k"
+required-features = ["std"]
+
+[[example]]
+name = "stress_10k_rigorous"
+required-features = ["std"]
+
+[[example]]
+name = "stress_popperian_10k"
+required-features = ["std"]
+
+[[example]]
+name = "turbine_10k_concurrent"
+required-features = ["std"]
 
 [dependencies]
 

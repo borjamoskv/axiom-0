@@ -1,6 +1,6 @@
 # Micro-AXIOM-0
 
-> **Zero-Dependency Quantitative Type Theory (QTT) Kernel with Normalization by Evaluation (NbE), Cumulative Universes & Wait-Free Atomic Memory (`Axiom-MM`) in Pure Rust.**
+> **Zero-dependency QTT kernel with normalization by evaluation, cumulative universes, a `no_std` + `alloc` core, and bounded-attempt atomic snapshots.**
 
 [![CI Status](https://img.shields.io/badge/CI_Workflow-Passing-brightgreen?style=flat-square)](https://github.com/borjamoskv/axiom-0/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue?style=flat-square)](./LICENSE)
@@ -10,14 +10,36 @@
 
 ## ⚡ Quickstart
 
-Verify formatting, strict lints, formal QTT/NbE & Seqlock test suites, and launch the interactive REPL:
+Validate the default hosted build and launch the interactive REPL:
 
 ```sh
-cargo fmt --all -- --check
-cargo clippy --all-targets -- -D warnings
-cargo test --all-targets
+cargo check --workspace -q
+cargo test --workspace -q
+cargo clippy --workspace -- -D warnings
 cargo run --bin micro-axiom-0
 ```
+
+### Hosted and bare-metal builds
+
+The `std` feature is enabled by default. Disable it to build the explicit QTT
+checker, evaluator, parser, erasure, scalar C99 generator and atomic snapshot
+plane with `core` and `alloc`. REPL, metavariable/implicit inference and parallel
+batches require `std`.
+
+```sh
+rustup target add aarch64-unknown-none
+cargo build --lib --no-default-features --target aarch64-unknown-none
+cargo test --workspace --no-default-features
+```
+
+The final bare-metal application supplies its allocator, panic handler and
+device-specific startup/linker configuration. Building the library does not
+verify firmware execution. See [features and progress guarantees](docs/NO_STD.md).
+
+To boot and test an actual `no_std` ELF in QEMU, follow the
+[minimal AArch64 firmware instructions](crates/qemu-firmware/README.md), or run
+`python3 crates/qemu-firmware/run.py --check-panic` after installing QEMU and the
+Rust target.
 
 ---
 
@@ -32,7 +54,7 @@ flowchart TD
     A["Zero-Copy QTT Lexer & Recursive Parser<br/>(src/lexer.rs · src/parser.rs)"]:::core --> B["Contiguous Arena AST & De Bruijn Levels<br/>(src/ast.rs)"]:::core
     B --> C["Bidirectional QTT Elaborator (0, 1, ω)<br/>(src/elaborator.rs)"]:::verify
     C --> D["Normalization by Evaluation (NbE)<br/>β-reduction & η-equality (src/eval.rs)"]:::verify
-    D --> E["Wait-Free Atomic SeqlockCell<T, N><br/>Axiom-MM (src/seqlock.rs)"]:::mem
+    D --> E["Bounded-attempt atomic SeqlockCell<T, N><br/>Axiom-MM (src/seqlock.rs)"]:::mem
 ```
 
 ```text
@@ -48,7 +70,7 @@ flowchart TD
 │   ├── eval.rs             # Normalización por Evaluación (NbE), Valores y Cierres
 │   ├── elaborator.rs       # Verificador bidireccional, subtipado cumulativo y álgebra QTT
 │   ├── repl.rs             # Bucle interactivo de alta exergía con estado global
-│   └── seqlock.rs          # Celda atómica lock-free / wait-free (Axiom-MM)
+│   └── seqlock.rs          # Core-only atomic snapshots with bounded attempts
 ├── docs/
 │   ├── MEMORY_MODEL.md     # Contrato formal y garantías de coherencia secuencial
 │   └── snapshot-protocol.md
@@ -132,11 +154,15 @@ Error de Tipado en Let: UsageMismatch { declared: One, observed: Zero }
 
 ## 3. Modelo Atómico Axiom-MM (`seqlock.rs`)
 
-`SeqlockCell<T, N>` implementa instantáneas atómicas secuenciales libres de bloqueos (*wait-free read*):
-- Cero bloqueos de lectura concurrentes frente a escrituras.
-- Barreras explícitas de adquisición y liberación (`Acquire` / `Release`).
-- Control de contención con presupuesto de reintento determinista (`try_read`).
-- Sellado formal de versiones pares e impares impidiendo estados intermedios.
+`SeqlockCell<T, N>` provides coherent snapshots of native atomic words using
+Acquire/Release ordering and an explicit read-attempt budget. `try_read(B)` uses
+at most `B * (N + 2)` atomic loads; `try_write` uses one load, at most one CAS,
+`N` payload stores and one commit. Both may fail under contention.
+
+These are Rust-level operation bounds, not a general hardware wait-free or
+real-time success guarantee. A paused writer can prevent successful reads and
+writes. Hosted `TurbineEngine` inference also uses Mutex/RwLock and joins worker
+threads, so the complete engine can block. See the [progress contract](docs/NO_STD.md#progress-and-wait-free-scope).
 
 ---
 

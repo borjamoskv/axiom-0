@@ -9,6 +9,7 @@ use micro_axiom_0::eval::{Value, eval};
 use micro_axiom_0::lexer::Lexer;
 use micro_axiom_0::parser::Parser;
 use micro_axiom_0::seqlock::SeqlockCell;
+#[cfg(feature = "std")]
 use micro_axiom_0::turbine::TurbineEngine;
 
 fn exec_let(
@@ -25,7 +26,8 @@ fn exec_let(
     match cmd {
         Command::Let { name, ty, term } => {
             let term_ty = if let Some(ann) = ty {
-                let ann_elab = synthesize_in_env(ast, ann, env, types).expect("type synthesis failed");
+                let ann_elab =
+                    synthesize_in_env(ast, ann, env, types).expect("type synthesis failed");
                 assert!(matches!(ann_elab.ty, Value::Universe(_)));
                 let expected = eval(ast, ann, env, None);
                 check_in_env(ast, term, expected.clone(), env, types).expect("term check failed");
@@ -164,6 +166,7 @@ fn test_enki_60_scitt_receipt_proof_erasure_and_c99_transduction() {
 }
 
 #[test]
+#[cfg(feature = "std")]
 fn test_larsa_120_parallel_batch_certification() {
     let mut ast = Ast::new();
     let mut roots = Vec::new();

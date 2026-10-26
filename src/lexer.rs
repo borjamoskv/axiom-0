@@ -3,7 +3,8 @@
 //! Scans UTF-8 source into atomic tokens with byte spans. Token text borrows source
 //! slices; collecting tokens and reporting errors may allocate.
 
-use std::fmt;
+use alloc::{borrow::ToOwned, format, string::String, vec::Vec};
+use core::fmt;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TokenKind {
@@ -96,11 +97,11 @@ impl fmt::Display for LexerError {
     }
 }
 
-impl std::error::Error for LexerError {}
+impl core::error::Error for LexerError {}
 
 pub struct Lexer<'a> {
     source: &'a str,
-    chars: std::str::CharIndices<'a>,
+    chars: core::str::CharIndices<'a>,
     peeked: Option<(usize, char)>,
 }
 

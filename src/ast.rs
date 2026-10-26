@@ -1,4 +1,5 @@
-use std::{
+use alloc::{string::String, vec::Vec};
+use core::{
     fmt,
     sync::atomic::{AtomicUsize, Ordering},
 };
@@ -44,8 +45,7 @@ impl fmt::Display for Quantity {
 
 static NEXT_ARENA: AtomicUsize = AtomicUsize::new(0);
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-#[derive(Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct ArenaId(usize);
 
 impl ArenaId {
@@ -219,7 +219,7 @@ impl fmt::Display for AstError {
         }
     }
 }
-impl std::error::Error for AstError {}
+impl core::error::Error for AstError {}
 
 pub struct Ast {
     arena: ArenaId,
@@ -259,14 +259,27 @@ impl Ast {
 
     fn push_spanned(&mut self, expression: Expr, span: Option<Span>) -> Result<ExprId, AstError> {
         match expression {
-            Expr::Pi { domain, codomain, .. } | Expr::Sigma { domain, codomain, .. } => {
+            Expr::Pi {
+                domain, codomain, ..
+            }
+            | Expr::Sigma {
+                domain, codomain, ..
+            } => {
                 self.expr(domain)?;
                 self.expr(codomain)?;
             }
             Expr::Lambda { body, .. } | Expr::Fst(body) | Expr::Snd(body) => {
                 self.expr(body)?;
             }
-            Expr::App { plicity: _, function, argument } | Expr::Pair { first: function, second: argument } => {
+            Expr::App {
+                plicity: _,
+                function,
+                argument,
+            }
+            | Expr::Pair {
+                first: function,
+                second: argument,
+            } => {
                 self.expr(function)?;
                 self.expr(argument)?;
             }
@@ -301,7 +314,17 @@ impl Ast {
                 self.expr(base)?;
                 self.expr(target)?;
             }
-            Expr::Var(_) | Expr::Universe(_) | Expr::UnitType | Expr::Unit | Expr::Bool | Expr::True | Expr::False | Expr::Hole | Expr::Meta(_) | Expr::NatType | Expr::Zero => {}
+            Expr::Var(_)
+            | Expr::Universe(_)
+            | Expr::UnitType
+            | Expr::Unit
+            | Expr::Bool
+            | Expr::True
+            | Expr::False
+            | Expr::Hole
+            | Expr::Meta(_)
+            | Expr::NatType
+            | Expr::Zero => {}
         }
         if let Some(span) = span {
             if span.start > span.end {

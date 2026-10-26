@@ -10,6 +10,12 @@
 //! types. No user code, allocation, conversion, or destructor runs while the
 //! writer owns the odd version. Sequence numbers never wrap.
 //!
+//! This module uses `core` only. A read or write returns after a bounded number
+//! of Rust-level atomic operations, possibly with an error. Neither successful
+//! access nor a portable hardware wait-free latency bound is guaranteed: Rust's
+//! native atomics are lock-free, but are not generally guaranteed wait-free.
+//! A paused writer can keep the version odd and make every read attempt fail.
+//!
 //! ```
 //! use micro_axiom_0::seqlock::SeqlockCell;
 //!
@@ -18,7 +24,7 @@
 //! let snapshot = cell.try_read(4)?;
 //! assert_eq!(snapshot.value, [4, 8]);
 //! assert_eq!(snapshot.version, 2);
-//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! # Ok::<(), Box<dyn core::error::Error>>(())
 //! ```
 //!
 //! Arbitrary objects cannot be read as atomic words:
@@ -28,7 +34,7 @@
 //! let _ = SeqlockCell::<String, 1>::new([String::from("not atomic")]);
 //! ```
 
-use std::{
+use core::{
     fmt,
     sync::atomic::{self, AtomicUsize, Ordering},
 };
@@ -116,7 +122,7 @@ impl fmt::Display for ReadError {
     }
 }
 
-impl std::error::Error for ReadError {}
+impl core::error::Error for ReadError {}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WriteError {
@@ -135,7 +141,7 @@ impl fmt::Display for WriteError {
     }
 }
 
-impl std::error::Error for WriteError {}
+impl core::error::Error for WriteError {}
 
 /// A fixed-width snapshot cell with multiple readers and serialized writers.
 ///
@@ -152,7 +158,7 @@ impl<T: AtomicValue, const N: usize> SeqlockCell<T, N> {
     pub fn new(value: [T; N]) -> Self {
         Self {
             sequence: AtomicUsize::new(0),
-            words: std::array::from_fn(|i| T::atomic_new(value[i])),
+            words: core::array::from_fn(|i| T::atomic_new(value[i])),
         }
     }
 
@@ -165,7 +171,7 @@ impl<T: AtomicValue, const N: usize> SeqlockCell<T, N> {
             if before & 1 != 0 {
                 continue;
             }
-            let value = std::array::from_fn(|i| T::load_acquire(&self.words[i]));
+            let value = core::array::from_fn(|i| T::load_acquire(&self.words[i]));
             let after = self.sequence.load(Ordering::Acquire);
             if before == after {
                 return Ok(Snapshot {

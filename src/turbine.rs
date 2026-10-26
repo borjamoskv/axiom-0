@@ -1,15 +1,21 @@
 //! Turbine: parallel elaboration with bounded-attempt atomic telemetry.
 //!
-//! Integrates the Axiom-MM memory model ([`SeqlockCell`]) into the elaborator
-//! pipeline. Snapshots summarize a completed elaboration; they omit its typing
-//! context and cannot be used as a memoization cache or a typing certificate.
-//! Snapshot operations can fail under contention. Batch elaboration uses scoped
-//! worker threads and waits for them to finish.
+//! The snapshot plane is available with `core` and `alloc`; construction allocates
+//! its slots, while snapshot reads and publications do not allocate or lock.
+//! Snapshots omit the typing context and are neither a memoization cache nor a
+//! typing certificate. Snapshot operations can fail under contention.
+//!
+//! Metavariable inference and parallel batches require the `std` feature. Their
+//! Mutex/RwLock operations and worker joins can block; the elaboration engine is
+//! not wait-free. Atomic snapshot bounds do not extend to allocation, inference
+//! or a maximum time to obtain a successful read or publication.
 
-use std::fmt;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use alloc::vec::Vec;
+use core::fmt;
+use core::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::ast::{Ast, ExprId, Quantity};
+#[cfg(feature = "std")]
 use crate::elaborator::{Elaboration, Error, check_with_turbine, synthesize_with_turbine};
 use crate::eval::Value;
 use crate::seqlock::{ReadError, SeqlockCell, Snapshot, WriteError};
@@ -188,8 +194,8 @@ impl fmt::Display for TurbineReadError {
     }
 }
 
-impl std::error::Error for TurbineReadError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+impl core::error::Error for TurbineReadError {
+    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
         match self {
             Self::Read(error) => Some(error),
             _ => None,
@@ -223,8 +229,8 @@ impl fmt::Display for TurbineWriteError {
     }
 }
 
-impl std::error::Error for TurbineWriteError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+impl core::error::Error for TurbineWriteError {
+    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
         match self {
             Self::Write(error) => Some(error),
             _ => None,
@@ -235,19 +241,29 @@ impl std::error::Error for TurbineWriteError {
 // Arena allocation stops before issuing usize::MAX, so it cannot be a valid ID.
 const UNBOUND_ARENA: usize = usize::MAX;
 
-use std::sync::RwLock;
+#[cfg(feature = "std")]
+use std::sync::{Mutex, RwLock};
 
 /// Parallel elaboration and atomic telemetry for exactly one AST arena.
 ///
 /// Houses a fixed-size vector of [`SeqlockCell<usize, 4>`]. Slot indices are valid
 /// only for the arena to which this engine is bound. Publications are best effort;
 /// inference always uses the AST and its typing context, not these summaries.
+/// Without `std`, this engine contains only the snapshot plane. Metavariable
+/// state, its solver and the two parallel batch methods are hosted facilities.
 pub struct TurbineEngine {
     arena: AtomicUsize,
     slots: Vec<SeqlockCell<usize, 4>>,
+    #[cfg(feature = "std")]
     meta_ctx: RwLock<Vec<Option<Value>>>,
+    /// Serializes occurs checks and commits across a complete unification.
+    #[cfg(feature = "std")]
+    pub(crate) unification: Mutex<()>,
+    #[cfg(feature = "std")]
     pub expr_to_meta: RwLock<std::collections::HashMap<crate::ast::ExprId, crate::ast::MetaId>>,
-    pub inserted_implicits: RwLock<std::collections::HashMap<crate::ast::ExprId, Vec<crate::ast::MetaId>>>,
+    #[cfg(feature = "std")]
+    pub inserted_implicits:
+        RwLock<std::collections::HashMap<crate::ast::ExprId, Vec<crate::ast::MetaId>>>,
 }
 
 impl TurbineEngine {
@@ -264,8 +280,13 @@ impl TurbineEngine {
         Self {
             arena: AtomicUsize::new(UNBOUND_ARENA),
             slots,
+            #[cfg(feature = "std")]
             meta_ctx: RwLock::new(Vec::new()),
+            #[cfg(feature = "std")]
+            unification: Mutex::new(()),
+            #[cfg(feature = "std")]
             expr_to_meta: RwLock::new(std::collections::HashMap::new()),
+            #[cfg(feature = "std")]
             inserted_implicits: RwLock::new(std::collections::HashMap::new()),
         }
     }
@@ -280,6 +301,7 @@ impl TurbineEngine {
     }
 
     /// Instantiates a new metavariable.
+    #[cfg(feature = "std")]
     pub fn new_meta(&self) -> crate::ast::MetaId {
         let mut ctx = self.meta_ctx.write().unwrap_or_else(|e| e.into_inner());
         let id = ctx.len();
@@ -287,15 +309,41 @@ impl TurbineEngine {
         crate::ast::MetaId(id)
     }
 
-    /// Resolves a metavariable with a value.
-    pub fn solve_meta(&self, meta: crate::ast::MetaId, value: Value) {
+    /// Resolves a metavariable with a value if it is currently unsolved.
+    ///
+    /// Returns `true` if `meta` was unbound and is now bound to `value`, or
+    /// `false` if another caller already bound `meta` or the ID is unknown.
+    #[cfg(feature = "std")]
+    pub fn solve_meta(&self, meta: crate::ast::MetaId, value: Value) -> bool {
+        let _transaction = self.unification.lock().unwrap_or_else(|e| e.into_inner());
+        self.solve_meta_in_transaction(meta, value)
+    }
+
+    #[cfg(feature = "std")]
+    pub(crate) fn has_meta(&self, meta: crate::ast::MetaId) -> bool {
+        meta.0
+            < self
+                .meta_ctx
+                .read()
+                .unwrap_or_else(|e| e.into_inner())
+                .len()
+    }
+
+    /// The caller holds `unification` until checking and committing have finished.
+    #[cfg(feature = "std")]
+    pub(crate) fn solve_meta_in_transaction(&self, meta: crate::ast::MetaId, value: Value) -> bool {
         let mut ctx = self.meta_ctx.write().unwrap_or_else(|e| e.into_inner());
-        if ctx[meta.0].is_none() {
-            ctx[meta.0] = Some(value);
+        match ctx.get_mut(meta.0) {
+            Some(slot @ None) => {
+                *slot = Some(value);
+                true
+            }
+            Some(Some(_)) | None => false,
         }
     }
 
     /// Forces a value, substituting solved metavariables recursively at the head.
+    #[cfg(feature = "std")]
     pub fn force(&self, _ast: &Ast, val: Value) -> Value {
         match val {
             Value::Meta(id, spine) => {
@@ -392,6 +440,7 @@ impl TurbineEngine {
     ///
     /// Distributes `roots` across available hardware threads using `std::thread::scope`.
     /// Zero external dependencies, pure standard library concurrency.
+    #[cfg(feature = "std")]
     pub fn elaborate_batch_parallel(
         &self,
         ast: &Ast,
@@ -446,6 +495,7 @@ impl TurbineEngine {
     }
 
     /// Parallel multi-threaded batch type-checking against an expected value.
+    #[cfg(feature = "std")]
     pub fn check_batch_parallel(
         &self,
         ast: &Ast,

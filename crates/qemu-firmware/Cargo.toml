@@ -1,0 +1,32 @@
+[package]
+name = "axiom0-qemu-firmware"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+publish = false
+
+# Keep the platform-specific binary out of the hosted root workspace.
+[workspace]
+
+[dependencies]
+micro-axiom-0 = { path = "../..", default-features = false }
+
+[features]
+panic-test = []
+
+[[bin]]
+name = "axiom0-qemu-firmware"
+path = "src/main.rs"
+test = false
+bench = false
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
+lto = "thin"
+codegen-units = 1
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
