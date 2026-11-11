@@ -4,7 +4,9 @@
 //! en el micro-núcleo QTT, estructurada en 10 dominios canónicos de 10 teoremas cada uno.
 
 use micro_axiom_0::ast::{Ast, Command, Expr, Level, Quantity};
-use micro_axiom_0::elaborator::{self, check, check_with_turbine, synthesize, synthesize_with_turbine};
+use micro_axiom_0::elaborator::{
+    self, check, check_with_turbine, synthesize, synthesize_with_turbine,
+};
 use micro_axiom_0::eval::{Neutral, Value, equiv, eval};
 use micro_axiom_0::lexer::Lexer;
 use micro_axiom_0::parser::Parser;
@@ -78,8 +80,16 @@ fn thm_005_refl_nat_succ() {
 #[test]
 fn thm_006_symmetry_generic() {
     let mut ast = Ast::new();
-    let term = parse_expr(&mut ast, "fn x -> fn y -> fn p -> J(fn b -> fn _ -> Id(Nat, b, x), refl(x), p)", &[]);
-    let ty = parse_expr(&mut ast, "fn (x: Nat) -> fn (y: Nat) -> fn (p: Id(Nat, x, y)) -> Id(Nat, y, x)", &[]);
+    let term = parse_expr(
+        &mut ast,
+        "fn x -> fn y -> fn p -> J(fn b -> fn _ -> Id(Nat, b, x), refl(x), p)",
+        &[],
+    );
+    let ty = parse_expr(
+        &mut ast,
+        "fn (x: Nat) -> fn (y: Nat) -> fn (p: Id(Nat, x, y)) -> Id(Nat, y, x)",
+        &[],
+    );
     let expected = eval(&ast, ty, &[], None);
     assert!(check(&ast, term, expected, &[]).is_ok());
 }
@@ -164,35 +174,68 @@ fn thm_010_transport_predicate() {
 fn thm_011_add_zero_left() {
     // 0 + n = n definitional
     let mut ast = Ast::new();
-    let term = parse_expr(&mut ast, "ind(fn _ -> Nat, S(S(Z)), fn _ -> fn ih -> S(ih), Z)", &[]);
+    let term = parse_expr(
+        &mut ast,
+        "ind(fn _ -> Nat, S(S(Z)), fn _ -> fn ih -> S(ih), Z)",
+        &[],
+    );
     let val = eval(&ast, term, &[], None);
-    assert_eq!(val, Value::Succ(Box::new(Value::Succ(Box::new(Value::Zero)))));
+    assert_eq!(
+        val,
+        Value::Succ(Box::new(Value::Succ(Box::new(Value::Zero))))
+    );
 }
 
 #[test]
 fn thm_012_add_zero_right_concrete() {
     // n + 0 = n
     let mut ast = Ast::new();
-    let term = parse_expr(&mut ast, "ind(fn _ -> Nat, Z, fn _ -> fn ih -> S(ih), S(S(S(Z))))", &[]);
+    let term = parse_expr(
+        &mut ast,
+        "ind(fn _ -> Nat, Z, fn _ -> fn ih -> S(ih), S(S(S(Z))))",
+        &[],
+    );
     let val = eval(&ast, term, &[], None);
-    assert_eq!(val, Value::Succ(Box::new(Value::Succ(Box::new(Value::Succ(Box::new(Value::Zero)))))));
+    assert_eq!(
+        val,
+        Value::Succ(Box::new(Value::Succ(Box::new(Value::Succ(Box::new(
+            Value::Zero
+        ))))))
+    );
 }
 
 #[test]
 fn thm_013_add_succ_left() {
     // S(1) + 2 = S(1 + 2) = 3
     let mut ast = Ast::new();
-    let term = parse_expr(&mut ast, "ind(fn _ -> Nat, S(S(Z)), fn _ -> fn ih -> S(ih), S(Z))", &[]);
+    let term = parse_expr(
+        &mut ast,
+        "ind(fn _ -> Nat, S(S(Z)), fn _ -> fn ih -> S(ih), S(Z))",
+        &[],
+    );
     let val = eval(&ast, term, &[], None);
-    assert_eq!(val, Value::Succ(Box::new(Value::Succ(Box::new(Value::Succ(Box::new(Value::Zero)))))));
+    assert_eq!(
+        val,
+        Value::Succ(Box::new(Value::Succ(Box::new(Value::Succ(Box::new(
+            Value::Zero
+        ))))))
+    );
 }
 
 #[test]
 fn thm_014_peano_addition_comm_base() {
     // 0 + 1 == 1 + 0 in NbE
     let mut ast = Ast::new();
-    let e1 = parse_expr(&mut ast, "ind(fn _ -> Nat, S(Z), fn _ -> fn ih -> S(ih), Z)", &[]);
-    let e2 = parse_expr(&mut ast, "ind(fn _ -> Nat, Z, fn _ -> fn ih -> S(ih), S(Z))", &[]);
+    let e1 = parse_expr(
+        &mut ast,
+        "ind(fn _ -> Nat, S(Z), fn _ -> fn ih -> S(ih), Z)",
+        &[],
+    );
+    let e2 = parse_expr(
+        &mut ast,
+        "ind(fn _ -> Nat, Z, fn _ -> fn ih -> S(ih), S(Z))",
+        &[],
+    );
     let v1 = eval(&ast, e1, &[], None);
     let v2 = eval(&ast, e2, &[], None);
     assert_eq!(v1, v2);
@@ -202,7 +245,11 @@ fn thm_014_peano_addition_comm_base() {
 fn thm_015_mul_zero_left() {
     // 0 * n = 0
     let mut ast = Ast::new();
-    let term = parse_expr(&mut ast, "ind(fn _ -> Nat, Z, fn _ -> fn ih -> ind(fn _ -> Nat, ih, fn _ -> fn a -> S(a), S(S(Z))), Z)", &[]);
+    let term = parse_expr(
+        &mut ast,
+        "ind(fn _ -> Nat, Z, fn _ -> fn ih -> ind(fn _ -> Nat, ih, fn _ -> fn a -> S(a), S(S(Z))), Z)",
+        &[],
+    );
     let val = eval(&ast, term, &[], None);
     assert_eq!(val, Value::Zero);
 }
@@ -211,7 +258,11 @@ fn thm_015_mul_zero_left() {
 fn thm_016_mul_zero_right() {
     // n * 0 = 0
     let mut ast = Ast::new();
-    let term = parse_expr(&mut ast, "ind(fn _ -> Nat, Z, fn _ -> fn ih -> ind(fn _ -> Nat, ih, fn _ -> fn a -> S(a), Z), S(S(S(Z))))", &[]);
+    let term = parse_expr(
+        &mut ast,
+        "ind(fn _ -> Nat, Z, fn _ -> fn ih -> ind(fn _ -> Nat, ih, fn _ -> fn a -> S(a), Z), S(S(S(Z))))",
+        &[],
+    );
     let val = eval(&ast, term, &[], None);
     assert_eq!(val, Value::Zero);
 }
@@ -220,26 +271,52 @@ fn thm_016_mul_zero_right() {
 fn thm_017_mul_one_left() {
     // 1 * 3 = 3
     let mut ast = Ast::new();
-    let term = parse_expr(&mut ast, "ind(fn _ -> Nat, Z, fn _ -> fn ih -> ind(fn _ -> Nat, ih, fn _ -> fn a -> S(a), S(S(S(Z)))), S(Z))", &[]);
+    let term = parse_expr(
+        &mut ast,
+        "ind(fn _ -> Nat, Z, fn _ -> fn ih -> ind(fn _ -> Nat, ih, fn _ -> fn a -> S(a), S(S(S(Z)))), S(Z))",
+        &[],
+    );
     let val = eval(&ast, term, &[], None);
-    assert_eq!(val, Value::Succ(Box::new(Value::Succ(Box::new(Value::Succ(Box::new(Value::Zero)))))));
+    assert_eq!(
+        val,
+        Value::Succ(Box::new(Value::Succ(Box::new(Value::Succ(Box::new(
+            Value::Zero
+        ))))))
+    );
 }
 
 #[test]
 fn thm_018_mul_one_right() {
     // 3 * 1 = 3
     let mut ast = Ast::new();
-    let term = parse_expr(&mut ast, "ind(fn _ -> Nat, Z, fn _ -> fn ih -> ind(fn _ -> Nat, ih, fn _ -> fn a -> S(a), S(Z)), S(S(S(Z))))", &[]);
+    let term = parse_expr(
+        &mut ast,
+        "ind(fn _ -> Nat, Z, fn _ -> fn ih -> ind(fn _ -> Nat, ih, fn _ -> fn a -> S(a), S(Z)), S(S(S(Z))))",
+        &[],
+    );
     let val = eval(&ast, term, &[], None);
-    assert_eq!(val, Value::Succ(Box::new(Value::Succ(Box::new(Value::Succ(Box::new(Value::Zero)))))));
+    assert_eq!(
+        val,
+        Value::Succ(Box::new(Value::Succ(Box::new(Value::Succ(Box::new(
+            Value::Zero
+        ))))))
+    );
 }
 
 #[test]
 fn thm_019_add_associativity_concrete() {
     // (1 + 2) + 3 == 1 + (2 + 3) = 6
     let mut ast = Ast::new();
-    let e1 = parse_expr(&mut ast, "ind(fn _ -> Nat, S(S(S(Z))), fn _ -> fn ih -> S(ih), ind(fn _ -> Nat, S(S(Z)), fn _ -> fn ih -> S(ih), S(Z)))", &[]);
-    let e2 = parse_expr(&mut ast, "ind(fn _ -> Nat, ind(fn _ -> Nat, S(S(S(Z))), fn _ -> fn ih -> S(ih), S(S(Z))), fn _ -> fn ih -> S(ih), S(Z))", &[]);
+    let e1 = parse_expr(
+        &mut ast,
+        "ind(fn _ -> Nat, S(S(S(Z))), fn _ -> fn ih -> S(ih), ind(fn _ -> Nat, S(S(Z)), fn _ -> fn ih -> S(ih), S(Z)))",
+        &[],
+    );
+    let e2 = parse_expr(
+        &mut ast,
+        "ind(fn _ -> Nat, ind(fn _ -> Nat, S(S(S(Z))), fn _ -> fn ih -> S(ih), S(S(Z))), fn _ -> fn ih -> S(ih), S(Z))",
+        &[],
+    );
     let v1 = eval(&ast, e1, &[], None);
     let v2 = eval(&ast, e2, &[], None);
     assert_eq!(v1, v2);
@@ -249,7 +326,11 @@ fn thm_019_add_associativity_concrete() {
 fn thm_020_mul_distributivity_concrete() {
     // 2 * (1 + 2) == (2 * 1) + (2 * 2) = 6
     let mut ast = Ast::new();
-    let e1 = parse_expr(&mut ast, "ind(fn _ -> Nat, Z, fn _ -> fn ih -> ind(fn _ -> Nat, ih, fn _ -> fn a -> S(a), S(S(S(Z)))), S(S(Z)))", &[]);
+    let e1 = parse_expr(
+        &mut ast,
+        "ind(fn _ -> Nat, Z, fn _ -> fn ih -> ind(fn _ -> Nat, ih, fn _ -> fn a -> S(a), S(S(S(Z)))), S(S(Z)))",
+        &[],
+    );
     let val = eval(&ast, e1, &[], None);
     let mut count = 0;
     let mut cur = &val;
@@ -284,8 +365,16 @@ fn thm_022_if_false_reduction() {
 fn thm_023_bool_not_involution() {
     // not(not(b)) == b for both True and False
     let mut ast = Ast::new();
-    let not_not_true = parse_expr(&mut ast, "if (if True then False else True) then False else True", &[]);
-    let not_not_false = parse_expr(&mut ast, "if (if False then False else True) then False else True", &[]);
+    let not_not_true = parse_expr(
+        &mut ast,
+        "if (if True then False else True) then False else True",
+        &[],
+    );
+    let not_not_false = parse_expr(
+        &mut ast,
+        "if (if False then False else True) then False else True",
+        &[],
+    );
     assert_eq!(eval(&ast, not_not_true, &[], None), Value::True);
     assert_eq!(eval(&ast, not_not_false, &[], None), Value::False);
 }
@@ -332,8 +421,16 @@ fn thm_027_bool_or_false_left() {
 fn thm_028_bool_de_morgan_and() {
     // not(True and False) == not(True) or not(False) == True
     let mut ast = Ast::new();
-    let lhs = parse_expr(&mut ast, "if (if True then False else False) then False else True", &[]);
-    let rhs = parse_expr(&mut ast, "if (if True then False else True) then True else (if False then False else True)", &[]);
+    let lhs = parse_expr(
+        &mut ast,
+        "if (if True then False else False) then False else True",
+        &[],
+    );
+    let rhs = parse_expr(
+        &mut ast,
+        "if (if True then False else True) then True else (if False then False else True)",
+        &[],
+    );
     assert_eq!(eval(&ast, lhs, &[], None), eval(&ast, rhs, &[], None));
     assert_eq!(eval(&ast, lhs, &[], None), Value::True);
 }
@@ -342,8 +439,16 @@ fn thm_028_bool_de_morgan_and() {
 fn thm_029_bool_de_morgan_or() {
     // not(False or True) == not(False) and not(True) == False
     let mut ast = Ast::new();
-    let lhs = parse_expr(&mut ast, "if (if False then True else True) then False else True", &[]);
-    let rhs = parse_expr(&mut ast, "if (if False then False else True) then (if True then False else True) else False", &[]);
+    let lhs = parse_expr(
+        &mut ast,
+        "if (if False then True else True) then False else True",
+        &[],
+    );
+    let rhs = parse_expr(
+        &mut ast,
+        "if (if False then False else True) then (if True then False else True) else False",
+        &[],
+    );
     assert_eq!(eval(&ast, lhs, &[], None), eval(&ast, rhs, &[], None));
     assert_eq!(eval(&ast, lhs, &[], None), Value::False);
 }
@@ -352,8 +457,16 @@ fn thm_029_bool_de_morgan_or() {
 fn thm_030_bool_xor_nilpotent() {
     // x xor x == False for both True and False
     let mut ast = Ast::new();
-    let xor_tt = parse_expr(&mut ast, "if True then (if True then False else True) else True", &[]);
-    let xor_ff = parse_expr(&mut ast, "if False then (if False then False else True) else False", &[]);
+    let xor_tt = parse_expr(
+        &mut ast,
+        "if True then (if True then False else True) else True",
+        &[],
+    );
+    let xor_ff = parse_expr(
+        &mut ast,
+        "if False then (if False then False else True) else False",
+        &[],
+    );
     assert_eq!(eval(&ast, xor_tt, &[], None), Value::False);
     assert_eq!(eval(&ast, xor_ff, &[], None), Value::False);
 }
@@ -365,7 +478,11 @@ fn thm_030_bool_xor_nilpotent() {
 #[test]
 fn thm_031_sigma_fst_projection() {
     let mut ast = Ast::new();
-    let cmd = parse_cmd(&mut ast, "let p : sigma (x : Nat) * Bool = (S(Z), True);", &[]);
+    let cmd = parse_cmd(
+        &mut ast,
+        "let p : sigma (x : Nat) * Bool = (S(Z), True);",
+        &[],
+    );
     if let Command::Let { ty, term, .. } = cmd {
         let ty_val = eval(&ast, ty.unwrap(), &[], None);
         assert!(check(&ast, term, ty_val, &[]).is_ok());
@@ -384,7 +501,10 @@ fn thm_033_sigma_eta_pair() {
     let mut ast = Ast::new();
     let p1 = parse_expr(&mut ast, "(S(Z), True).1", &[]);
     let p2 = parse_expr(&mut ast, "(S(Z), True).2", &[]);
-    assert_eq!(eval(&ast, p1, &[], None), Value::Succ(Box::new(Value::Zero)));
+    assert_eq!(
+        eval(&ast, p1, &[], None),
+        Value::Succ(Box::new(Value::Zero))
+    );
     assert_eq!(eval(&ast, p2, &[], None), Value::True);
 }
 
@@ -401,7 +521,11 @@ fn thm_034_sigma_dependent_predicate() {
 #[test]
 fn thm_035_sigma_linear_preservation() {
     let mut ast = Ast::new();
-    let ty = parse_expr(&mut ast, "fn :^1 (p : sigma :^1 (x: Nat) * Bool) -> Nat", &[]);
+    let ty = parse_expr(
+        &mut ast,
+        "fn :^1 (p : sigma :^1 (x: Nat) * Bool) -> Nat",
+        &[],
+    );
     let term = parse_expr(&mut ast, "fn :^1 p -> p.1", &[]);
     let ty_val = eval(&ast, ty, &[], None);
     let elab = check(&ast, term, ty_val, &[]).unwrap();
@@ -421,7 +545,10 @@ fn thm_036_sigma_erased_component() {
 fn thm_037_sigma_nested_fst() {
     let mut ast = Ast::new();
     let term = parse_expr(&mut ast, "((S(Z), True), False).1.1", &[]);
-    assert_eq!(eval(&ast, term, &[], None), Value::Succ(Box::new(Value::Zero)));
+    assert_eq!(
+        eval(&ast, term, &[], None),
+        Value::Succ(Box::new(Value::Zero))
+    );
 }
 
 #[test]
@@ -434,7 +561,11 @@ fn thm_038_sigma_nested_snd() {
 #[test]
 fn thm_039_sigma_swap_involution() {
     let mut ast = Ast::new();
-    let swap_swap = parse_expr(&mut ast, "((((S(Z), False).2, (S(Z), False).1)).2, (((S(Z), False).2, (S(Z), False).1)).1)", &[]);
+    let swap_swap = parse_expr(
+        &mut ast,
+        "((((S(Z), False).2, (S(Z), False).1)).2, (((S(Z), False).2, (S(Z), False).1)).1)",
+        &[],
+    );
     let p = parse_expr(&mut ast, "(S(Z), False)", &[]);
     assert_eq!(eval(&ast, swap_swap, &[], None), eval(&ast, p, &[], None));
 }
@@ -443,7 +574,10 @@ fn thm_039_sigma_swap_involution() {
 fn thm_040_sigma_unit_absorption() {
     let mut ast = Ast::new();
     let term = parse_expr(&mut ast, "((), S(S(Z))).2", &[]);
-    assert_eq!(eval(&ast, term, &[], None), Value::Succ(Box::new(Value::Succ(Box::new(Value::Zero)))));
+    assert_eq!(
+        eval(&ast, term, &[], None),
+        Value::Succ(Box::new(Value::Succ(Box::new(Value::Zero))))
+    );
 }
 
 // ============================================================================
@@ -629,7 +763,11 @@ fn thm_062_combinator_k() {
 #[test]
 fn thm_063_combinator_s() {
     let mut ast = Ast::new();
-    let term = parse_expr(&mut ast, "(fn x -> fn y -> fn z -> x z (y z)) (fn a -> fn b -> a) (fn c -> True) False", &[]);
+    let term = parse_expr(
+        &mut ast,
+        "(fn x -> fn y -> fn z -> x z (y z)) (fn a -> fn b -> a) (fn c -> True) False",
+        &[],
+    );
     assert_eq!(eval(&ast, term, &[], None), Value::False);
 }
 
@@ -637,24 +775,42 @@ fn thm_063_combinator_s() {
 fn thm_064_combinator_skk_equiv_i() {
     // (S K K) x == I x == x
     let mut ast = Ast::new();
-    let skk_true = parse_expr(&mut ast, "(fn x -> fn y -> fn z -> x z (y z)) (fn a -> fn b -> a) (fn a -> fn b -> a) True", &[]);
+    let skk_true = parse_expr(
+        &mut ast,
+        "(fn x -> fn y -> fn z -> x z (y z)) (fn a -> fn b -> a) (fn a -> fn b -> a) True",
+        &[],
+    );
     let i_true = parse_expr(&mut ast, "(fn x -> x) True", &[]);
-    assert_eq!(eval(&ast, skk_true, &[], None), eval(&ast, i_true, &[], None));
+    assert_eq!(
+        eval(&ast, skk_true, &[], None),
+        eval(&ast, i_true, &[], None)
+    );
 }
 
 #[test]
 fn thm_065_combinator_b() {
     // B f g x = f (g x)
     let mut ast = Ast::new();
-    let b_app = parse_expr(&mut ast, "(fn f -> fn g -> fn x -> f (g x)) (fn n -> S(n)) (fn n -> S(n)) Z", &[]);
-    assert_eq!(eval(&ast, b_app, &[], None), Value::Succ(Box::new(Value::Succ(Box::new(Value::Zero)))));
+    let b_app = parse_expr(
+        &mut ast,
+        "(fn f -> fn g -> fn x -> f (g x)) (fn n -> S(n)) (fn n -> S(n)) Z",
+        &[],
+    );
+    assert_eq!(
+        eval(&ast, b_app, &[], None),
+        Value::Succ(Box::new(Value::Succ(Box::new(Value::Zero))))
+    );
 }
 
 #[test]
 fn thm_066_combinator_c() {
     // C f x y = f y x
     let mut ast = Ast::new();
-    let c_app = parse_expr(&mut ast, "(fn f -> fn x -> fn y -> f y x) (fn a -> fn b -> a) True False", &[]);
+    let c_app = parse_expr(
+        &mut ast,
+        "(fn f -> fn x -> fn y -> f y x) (fn a -> fn b -> a) True False",
+        &[],
+    );
     assert_eq!(eval(&ast, c_app, &[], None), Value::False);
 }
 
@@ -662,8 +818,15 @@ fn thm_066_combinator_c() {
 fn thm_067_combinator_w() {
     // W f x = f x x
     let mut ast = Ast::new();
-    let w_app = parse_expr(&mut ast, "(fn f -> fn x -> f x x) (fn a -> fn b -> (a, b)) True", &[]);
-    assert_eq!(eval(&ast, w_app, &[], None), Value::Pair(Box::new(Value::True), Box::new(Value::True)));
+    let w_app = parse_expr(
+        &mut ast,
+        "(fn f -> fn x -> f x x) (fn a -> fn b -> (a, b)) True",
+        &[],
+    );
+    assert_eq!(
+        eval(&ast, w_app, &[], None),
+        Value::Pair(Box::new(Value::True), Box::new(Value::True))
+    );
 }
 
 #[test]
@@ -674,7 +837,10 @@ fn thm_068_curry_uncurry_roundtrip() {
         "(fn f -> fn a -> fn b -> f (a, b)) (fn p -> (p.1, p.2)) True False",
         &[],
     );
-    assert_eq!(eval(&ast, curry_uncurry, &[], None), Value::Pair(Box::new(Value::True), Box::new(Value::False)));
+    assert_eq!(
+        eval(&ast, curry_uncurry, &[], None),
+        Value::Pair(Box::new(Value::True), Box::new(Value::False))
+    );
 }
 
 #[test]
@@ -691,7 +857,10 @@ fn thm_069_eta_expansion_pi() {
 fn thm_070_beta_reduction_pi() {
     let mut ast = Ast::new();
     let beta = parse_expr(&mut ast, "(fn x -> S(x)) (S(Z))", &[]);
-    assert_eq!(eval(&ast, beta, &[], None), Value::Succ(Box::new(Value::Succ(Box::new(Value::Zero)))));
+    assert_eq!(
+        eval(&ast, beta, &[], None),
+        Value::Succ(Box::new(Value::Succ(Box::new(Value::Zero))))
+    );
 }
 
 // ============================================================================
@@ -824,7 +993,8 @@ fn thm_075_hole_polymorphic_instantiation() {
 #[test]
 fn thm_076_hole_cascade_two_step() {
     let mut ast = Ast::new();
-    let script1 = "let pair_builder : fn (A: type) -> fn (a: A) -> sigma (x: A) * A = fn A -> fn a -> (a, a)";
+    let script1 =
+        "let pair_builder : fn (A: type) -> fn (a: A) -> sigma (x: A) * A = fn A -> fn a -> (a, a)";
     let cmd1 = parse_cmd(&mut ast, script1, &[]);
     let names = vec!["pair_builder".to_string()];
     let script2 = "let p = pair_builder ? S(Z)";
@@ -855,9 +1025,16 @@ fn thm_077_hole_spine_instantiation() {
     let hole = ast.push(Expr::Hole).unwrap();
     let turbine = TurbineEngine::for_ast(&ast);
     // Hole evaluates to Meta in turbine
-    turbine.expr_to_meta.write().unwrap().insert(hole, micro_axiom_0::ast::MetaId(999));
+    turbine
+        .expr_to_meta
+        .write()
+        .unwrap()
+        .insert(hole, micro_axiom_0::ast::MetaId(999));
     let val = eval(&ast, hole, &[], Some(&turbine));
-    assert!(matches!(val, Value::Meta(micro_axiom_0::ast::MetaId(999), _)));
+    assert!(matches!(
+        val,
+        Value::Meta(micro_axiom_0::ast::MetaId(999), _)
+    ));
 }
 
 #[test]
@@ -901,7 +1078,8 @@ fn thm_079_explicit_override_of_implicit() {
 #[test]
 fn thm_080_chained_implicits() {
     let mut ast = Ast::new();
-    let script = "let f : fn {A : type} -> fn {B : type} -> fn (b : B) -> B = fn {A} -> fn {B} -> fn b -> b";
+    let script =
+        "let f : fn {A : type} -> fn {B : type} -> fn (b : B) -> B = fn {A} -> fn {B} -> fn b -> b";
     let cmd = parse_cmd(&mut ast, script, &[]);
     if let Command::Let { ty, term, .. } = cmd {
         let ty_val = eval(&ast, ty.unwrap(), &[], None);
@@ -999,7 +1177,10 @@ fn thm_089_turbine_concurrent_publish_read() {
     };
     assert!(turbine.publish(dummy, snap).is_ok());
     let cached = turbine.try_get_cached(dummy, 4).unwrap();
-    assert_eq!(AtomicElabSnapshot::from_words(cached.value).status, ElabStatus::CertifiedValid);
+    assert_eq!(
+        AtomicElabSnapshot::from_words(cached.value).status,
+        ElabStatus::CertifiedValid
+    );
 }
 
 #[test]
@@ -1045,11 +1226,19 @@ fn thm_092_scope_isolation_de_bruijn() {
 fn thm_093_shared_expression_ast_protection() {
     let mut ast = Ast::new();
     let node = ast.push(Expr::Unit).unwrap();
-    let pair = ast.push(Expr::Pair { first: node, second: node }).unwrap();
+    let pair = ast
+        .push(Expr::Pair {
+            first: node,
+            second: node,
+        })
+        .unwrap();
     let ty = parse_expr(&mut ast, "sigma (x: UnitType) * UnitType", &[]);
     let expected = eval(&ast, ty, &[], None);
     let elab_res = check(&ast, pair, expected, &[]);
-    assert!(matches!(elab_res, Err(micro_axiom_0::elaborator::Error::SharedExpression(_))));
+    assert!(matches!(
+        elab_res,
+        Err(micro_axiom_0::elaborator::Error::SharedExpression(_))
+    ));
 }
 
 #[test]
@@ -1059,35 +1248,61 @@ fn thm_094_context_length_mismatch_protection() {
     let env = vec![Value::Unit];
     let types = vec![]; // Length mismatch: env=1, types=0
     let res = elaborator::check_in_env(&ast, root, Value::UnitType, &env, &types);
-    assert!(matches!(res, Err(micro_axiom_0::elaborator::Error::ContextLengthMismatch { .. })));
+    assert!(matches!(
+        res,
+        Err(micro_axiom_0::elaborator::Error::ContextLengthMismatch { .. })
+    ));
 }
 
 #[test]
 fn thm_095_peano_ind_zero_case_definitional() {
     let mut ast = Ast::new();
-    let term = parse_expr(&mut ast, "ind(fn _ -> Nat, S(S(Z)), fn _ -> fn ih -> S(ih), Z)", &[]);
-    assert_eq!(eval(&ast, term, &[], None), Value::Succ(Box::new(Value::Succ(Box::new(Value::Zero)))));
+    let term = parse_expr(
+        &mut ast,
+        "ind(fn _ -> Nat, S(S(Z)), fn _ -> fn ih -> S(ih), Z)",
+        &[],
+    );
+    assert_eq!(
+        eval(&ast, term, &[], None),
+        Value::Succ(Box::new(Value::Succ(Box::new(Value::Zero))))
+    );
 }
 
 #[test]
 fn thm_096_peano_ind_step_case_definitional() {
     let mut ast = Ast::new();
-    let term = parse_expr(&mut ast, "ind(fn _ -> Nat, S(Z), fn _ -> fn ih -> S(ih), S(Z))", &[]);
-    assert_eq!(eval(&ast, term, &[], None), Value::Succ(Box::new(Value::Succ(Box::new(Value::Zero)))));
+    let term = parse_expr(
+        &mut ast,
+        "ind(fn _ -> Nat, S(Z), fn _ -> fn ih -> S(ih), S(Z))",
+        &[],
+    );
+    assert_eq!(
+        eval(&ast, term, &[], None),
+        Value::Succ(Box::new(Value::Succ(Box::new(Value::Zero))))
+    );
 }
 
 #[test]
 fn thm_097_martin_lof_j_refl_definitional() {
     let mut ast = Ast::new();
     let term = parse_expr(&mut ast, "J(fn b -> fn _ -> Nat, S(S(S(Z))), refl(Z))", &[]);
-    assert_eq!(eval(&ast, term, &[], None), Value::Succ(Box::new(Value::Succ(Box::new(Value::Succ(Box::new(Value::Zero)))))));
+    assert_eq!(
+        eval(&ast, term, &[], None),
+        Value::Succ(Box::new(Value::Succ(Box::new(Value::Succ(Box::new(
+            Value::Zero
+        ))))))
+    );
 }
 
 #[test]
 fn thm_098_neutral_j_suspension() {
     let mut ast = Ast::new();
     let p_var = Value::Neutral(Neutral::Var(Level(0)));
-    let term = parse_expr(&mut ast, "J(fn b -> fn _ -> Nat, S(Z), p)", &["p".to_string()]);
+    let term = parse_expr(
+        &mut ast,
+        "J(fn b -> fn _ -> Nat, S(Z), p)",
+        &["p".to_string()],
+    );
     let val = eval(&ast, term, &[p_var], None);
     assert!(matches!(val, Value::Neutral(Neutral::J(..))));
 }
@@ -1096,7 +1311,11 @@ fn thm_098_neutral_j_suspension() {
 fn thm_099_neutral_ind_suspension() {
     let mut ast = Ast::new();
     let n_var = Value::Neutral(Neutral::Var(Level(0)));
-    let term = parse_expr(&mut ast, "ind(fn _ -> Nat, Z, fn _ -> fn ih -> S(ih), n)", &["n".to_string()]);
+    let term = parse_expr(
+        &mut ast,
+        "ind(fn _ -> Nat, Z, fn _ -> fn ih -> S(ih), n)",
+        &["n".to_string()],
+    );
     let val = eval(&ast, term, &[n_var], None);
     assert!(matches!(val, Value::Neutral(Neutral::Ind(..))));
 }
@@ -1108,7 +1327,12 @@ fn thm_100_clausura_epistemica_omega() {
     let mut ast = Ast::new();
     let term = parse_expr(&mut ast, "(fn x -> refl(x)) S(S(Z))", &[]);
     let val = eval(&ast, term, &[], None);
-    assert_eq!(val, Value::Refl(Box::new(Value::Succ(Box::new(Value::Succ(Box::new(Value::Zero)))))));
+    assert_eq!(
+        val,
+        Value::Refl(Box::new(Value::Succ(Box::new(Value::Succ(Box::new(
+            Value::Zero
+        ))))))
+    );
 
     let canonical = parse_expr(&mut ast, "refl(S(S(Z)))", &[]);
     let ty = parse_expr(&mut ast, "Id(Nat, S(S(Z)), S(S(Z)))", &[]);

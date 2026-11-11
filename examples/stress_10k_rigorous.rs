@@ -143,7 +143,8 @@ fn main() {
                 // ((fn :^1 x -> x) : (Unit -> Unit)) ()
                 let var_0 = ast.push(Expr::Var(Level(0))).unwrap();
                 let lam = ast
-                    .push(Expr::Lambda { plicity: micro_axiom_0::ast::Plicity::Explicit,
+                    .push(Expr::Lambda {
+                        plicity: micro_axiom_0::ast::Plicity::Explicit,
                         quantity: Quantity::One,
                         body: var_0,
                     })
@@ -151,7 +152,8 @@ fn main() {
                 let u1 = ast.push(Expr::UnitType).unwrap();
                 let u2 = ast.push(Expr::UnitType).unwrap();
                 let fn_ty = ast
-                    .push(Expr::Pi { plicity: micro_axiom_0::ast::Plicity::Explicit,
+                    .push(Expr::Pi {
+                        plicity: micro_axiom_0::ast::Plicity::Explicit,
                         quantity: Quantity::One,
                         domain: u1,
                         codomain: u2,
@@ -165,7 +167,8 @@ fn main() {
                     .unwrap();
                 let unit = ast.push(Expr::Unit).unwrap();
                 let app = ast
-                    .push(Expr::App { plicity: micro_axiom_0::ast::Plicity::Explicit,
+                    .push(Expr::App {
+                        plicity: micro_axiom_0::ast::Plicity::Explicit,
                         function: ann_lam,
                         argument: unit,
                     })
@@ -184,7 +187,8 @@ fn main() {
                 let unit_dom = ast.push(Expr::UnitType).unwrap();
                 let unit_cod = ast.push(Expr::UnitType).unwrap();
                 let pi_ty = ast
-                    .push(Expr::Pi { plicity: micro_axiom_0::ast::Plicity::Explicit,
+                    .push(Expr::Pi {
+                        plicity: micro_axiom_0::ast::Plicity::Explicit,
                         quantity: Quantity::One,
                         domain: unit_dom,
                         codomain: unit_cod,
@@ -216,13 +220,15 @@ fn main() {
                 // Función compuesta de 2 niveles: fn :^w x -> fn :^1 y -> y
                 let var_y = ast.push(Expr::Var(Level(1))).unwrap();
                 let lam_inner = ast
-                    .push(Expr::Lambda { plicity: micro_axiom_0::ast::Plicity::Explicit,
+                    .push(Expr::Lambda {
+                        plicity: micro_axiom_0::ast::Plicity::Explicit,
                         quantity: Quantity::One,
                         body: var_y,
                     })
                     .unwrap();
                 let lam_outer = ast
-                    .push(Expr::Lambda { plicity: micro_axiom_0::ast::Plicity::Explicit,
+                    .push(Expr::Lambda {
+                        plicity: micro_axiom_0::ast::Plicity::Explicit,
                         quantity: Quantity::Omega,
                         body: lam_inner,
                     })
@@ -231,7 +237,8 @@ fn main() {
                 let cod_dom = ast.push(Expr::UnitType).unwrap();
                 let cod_cod = ast.push(Expr::UnitType).unwrap();
                 let cod_pi = ast
-                    .push(Expr::Pi { plicity: micro_axiom_0::ast::Plicity::Explicit,
+                    .push(Expr::Pi {
+                        plicity: micro_axiom_0::ast::Plicity::Explicit,
                         quantity: Quantity::One,
                         domain: cod_dom,
                         codomain: cod_cod,

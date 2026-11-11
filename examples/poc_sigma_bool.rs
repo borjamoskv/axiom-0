@@ -1,8 +1,8 @@
 use micro_axiom_0::ast::{Ast, Command};
+use micro_axiom_0::elaborator::{check_in_env, synthesize_in_env};
 use micro_axiom_0::eval::eval;
 use micro_axiom_0::lexer::Lexer;
 use micro_axiom_0::parser::Parser;
-use micro_axiom_0::elaborator::{synthesize_in_env, check_in_env};
 
 fn main() {
     println!("============================================================");
@@ -10,10 +10,22 @@ fn main() {
     println!("============================================================\n");
 
     let scripts = vec![
-        ("1. Función Lógica", "let not : fn (b : Bool) -> Bool = fn b -> if b then False else True"),
-        ("2. Definición Topológica (Tipo Sigma Dependiente)", "let DepType : type = sigma (b : Bool) * if b then UnitType else Bool"),
-        ("3. Colapso en Rama True (Exige Unit)", "let pair_t : DepType = (True, ())"),
-        ("4. Colapso en Rama False (Exige Bool)", "let pair_f : DepType = (False, not False)"),
+        (
+            "1. Función Lógica",
+            "let not : fn (b : Bool) -> Bool = fn b -> if b then False else True",
+        ),
+        (
+            "2. Definición Topológica (Tipo Sigma Dependiente)",
+            "let DepType : type = sigma (b : Bool) * if b then UnitType else Bool",
+        ),
+        (
+            "3. Colapso en Rama True (Exige Unit)",
+            "let pair_t : DepType = (True, ())",
+        ),
+        (
+            "4. Colapso en Rama False (Exige Bool)",
+            "let pair_f : DepType = (False, not False)",
+        ),
         ("5. Evaluación NbE (Proyección Fst)", "pair_f.1"),
         ("6. Evaluación NbE (Proyección Snd)", "pair_f.2"),
     ];
@@ -63,7 +75,7 @@ fn main() {
             }
         }
     }
-    
+
     println!("============================================================");
     println!("[MUSHUSHU-0] Atestación de prueba dependiente completada con éxito.");
     println!("============================================================");

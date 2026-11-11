@@ -118,7 +118,8 @@ fn test_turbine_parallel_batch_checking() {
     for _ in 0..32 {
         let var0 = ast.push(Expr::Var(Level(0))).unwrap();
         let lam = ast
-            .push(Expr::Lambda { plicity: micro_axiom_0::ast::Plicity::Explicit,
+            .push(Expr::Lambda {
+                plicity: micro_axiom_0::ast::Plicity::Explicit,
                 quantity: Quantity::One,
                 body: var0,
             })
@@ -130,7 +131,8 @@ fn test_turbine_parallel_batch_checking() {
     let u0 = ast.push(Expr::Universe(0)).unwrap();
     let u0_cod = ast.push(Expr::Universe(0)).unwrap();
     let pi_ty = ast
-        .push(Expr::Pi { plicity: micro_axiom_0::ast::Plicity::Explicit,
+        .push(Expr::Pi {
+            plicity: micro_axiom_0::ast::Plicity::Explicit,
             quantity: Quantity::One,
             domain: u0,
             codomain: u0_cod,

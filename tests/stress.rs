@@ -9,7 +9,7 @@ use std::thread;
 use std::time::Instant;
 
 /// 1. Concurrency Stress: 8 readers + 4 writers hammering SeqlockCell with 100,000 writes and millions of reads.
-/// Ensures strict memory coherence: [v, v * 2, v * 3, v * 4] is never seen torn.
+///    Ensures strict memory coherence: [v, v * 2, v * 3, v * 4] is never seen torn.
 #[test]
 fn test_stress_concurrent_seqlock_hammering() {
     println!("\n=== [STRESS 1/6] SeqlockCell Massive Concurrency Hammering ===");
@@ -88,7 +88,10 @@ fn test_stress_concurrent_seqlock_hammering() {
         "-> Executed {} verified coherent reads ({} contention retries) in {:?}",
         clean, retries, elapsed
     );
-    println!("-> Throughput: {:.2} M reads/sec", (clean as f64) / (elapsed.as_secs_f64() * 1_000_000.0));
+    println!(
+        "-> Throughput: {:.2} M reads/sec",
+        (clean as f64) / (elapsed.as_secs_f64() * 1_000_000.0)
+    );
     assert!(clean > 10_000);
 }
 
@@ -219,7 +222,8 @@ fn test_stress_deep_inductive_recursion_peano() {
         .unwrap();
 
     // 1. Synthesize & Check Type
-    let elab = elaborator::synthesize(&ast, add_expr, &[]).expect("Type check failed for Peano addition");
+    let elab =
+        elaborator::synthesize(&ast, add_expr, &[]).expect("Type check failed for Peano addition");
     assert_eq!(elab.ty, Value::NatType);
 
     // 2. Evaluate via NbE
@@ -236,7 +240,10 @@ fn test_stress_deep_inductive_recursion_peano() {
     assert_eq!(count, 80, "Peano addition 50 + 30 must evaluate to 80");
 
     let elapsed = start.elapsed();
-    println!("-> Elaborated and normalized Peano 50 + 30 = 80 in {:?}", elapsed);
+    println!(
+        "-> Elaborated and normalized Peano 50 + 30 = 80 in {:?}",
+        elapsed
+    );
 }
 
 /// 5. Batch Parallel Verification: 256 polymorphic terms checked concurrently across threads.
@@ -302,8 +309,8 @@ fn test_stress_deep_linear_usage_tracking() {
 
     for i in (0..depth).rev() {
         let quantity = match i % 3 {
-            0 => Quantity::Zero, // erased
-            1 => Quantity::One,  // linear (unused here, so must permit Zero? Wait!)
+            0 => Quantity::Zero,  // erased
+            1 => Quantity::One,   // linear (unused here, so must permit Zero? Wait!)
             _ => Quantity::Omega, // unrestricted
         };
 
@@ -343,12 +350,17 @@ fn test_stress_deep_linear_usage_tracking() {
     }
 
     let expected_val = eval(&ast, expected_ty, &[], None);
-    let elab = elaborator::check(&ast, body, expected_val, &[])
-        .expect("64-level QTT check failed");
-    assert!(elab.usages.is_empty(), "Usages outside closed term must be empty");
+    let elab = elaborator::check(&ast, body, expected_val, &[]).expect("64-level QTT check failed");
+    assert!(
+        elab.usages.is_empty(),
+        "Usages outside closed term must be empty"
+    );
 
     let elapsed = start.elapsed();
-    println!("-> Elaborated 64-level deep QTT term with exact semiring arithmetic in {:?}", elapsed);
+    println!(
+        "-> Elaborated 64-level deep QTT term with exact semiring arithmetic in {:?}",
+        elapsed
+    );
 }
 
 /// 7. Deep NbE Reduction: Peano Multiplication via Nested Inductive Double Recursion (4 * 5 = 20).
@@ -372,7 +384,7 @@ fn test_stress_peano_multiplication_double_induction() {
         peano(b),
         peano(a)
     );
-    
+
     let mut ast = Ast::new();
     let expr = {
         let mut lexer = micro_axiom_0::lexer::Lexer::new(&src);
@@ -382,7 +394,8 @@ fn test_stress_peano_multiplication_double_induction() {
     };
 
     // 1. Synthesize & Type Check
-    let elab = elaborator::synthesize(&ast, expr, &[]).expect("Type check failed for Peano multiplication");
+    let elab = elaborator::synthesize(&ast, expr, &[])
+        .expect("Type check failed for Peano multiplication");
     assert_eq!(elab.ty, Value::NatType);
 
     // 2. Evaluate via NbE
@@ -396,10 +409,20 @@ fn test_stress_peano_multiplication_double_induction() {
         current = inner;
     }
     assert_eq!(*current, Value::Zero);
-    assert_eq!(count, a * b, "Peano multiplication 10 * 10 must evaluate to 100");
+    assert_eq!(
+        count,
+        a * b,
+        "Peano multiplication 10 * 10 must evaluate to 100"
+    );
 
     let elapsed = start.elapsed();
-    println!("-> Elaborated and normalized Peano {} * {} = {} in {:?}", a, b, a * b, elapsed);
+    println!(
+        "-> Elaborated and normalized Peano {} * {} = {} in {:?}",
+        a,
+        b,
+        a * b,
+        elapsed
+    );
 }
 
 /// 8. Universe Tower Stress: Cumulativity subtyping and universe level arithmetic across 1,000 stratifications.
@@ -418,13 +441,19 @@ fn test_stress_deep_tower_universes_cumulativity() {
     let mut ast2 = Ast::new();
     let u0_term = ast2.push(Expr::Universe(0)).unwrap();
     let check_cumul = elaborator::check(&ast2, u0_term, Value::Universe(1000), &[]);
-    assert!(check_cumul.is_ok(), "U0 must be accepted at expected type U_1000 by cumulativity");
+    assert!(
+        check_cumul.is_ok(),
+        "U0 must be accepted at expected type U_1000 by cumulativity"
+    );
 
     // Reverse cumulativity: checking U_1000 against U_0 must fail deterministically
     let mut ast3 = Ast::new();
     let u1000_term = ast3.push(Expr::Universe(1000)).unwrap();
     let check_reverse = elaborator::check(&ast3, u1000_term, Value::Universe(0), &[]);
-    assert!(check_reverse.is_err(), "U1000 must be rejected when expected type is U0");
+    assert!(
+        check_reverse.is_err(),
+        "U1000 must be rejected when expected type is U0"
+    );
 
     // Large Pi formation: Pi (x: U_500) -> U_600 has type U_601
     let mut ast4 = Ast::new();
@@ -442,7 +471,10 @@ fn test_stress_deep_tower_universes_cumulativity() {
     assert_eq!(elab_pi.ty, Value::Universe(601));
 
     let elapsed = start.elapsed();
-    println!("-> Verified 1,000-level universe cumulativity boundaries in {:?}", elapsed);
+    println!(
+        "-> Verified 1,000-level universe cumulativity boundaries in {:?}",
+        elapsed
+    );
 }
 
 /// 9. Lexer & Parser Throughput Stress: Tokenizing and parsing 50,000 bytes of nested AST expressions.
@@ -514,7 +546,12 @@ fn test_stress_seqlock_wide_payload_concurrent_saturation() {
                     let words = snap.value;
                     let base = words[0];
                     for (idx, &w) in words.iter().enumerate() {
-                        assert_eq!(w, base + idx, "64-byte payload torn read detected at word {}", idx);
+                        assert_eq!(
+                            w,
+                            base + idx,
+                            "64-byte payload torn read detected at word {}",
+                            idx
+                        );
                     }
                     local_reads += 1;
                 }
@@ -562,7 +599,10 @@ fn test_stress_seqlock_wide_payload_concurrent_saturation() {
         num_writers * writes_per_thread,
         num_writers
     );
-    println!("-> Executed {} verified 64-byte coherent reads in {:?}", reads, elapsed);
+    println!(
+        "-> Executed {} verified 64-byte coherent reads in {:?}",
+        reads, elapsed
+    );
 }
 
 /// 11. Turbine Engine Extreme Batch Scalability: 1,024 polymorphic identity functions verified in parallel.
@@ -667,5 +707,8 @@ fn test_stress_metavariable_hole_cascade_unification() {
     }
 
     let elapsed = start.elapsed();
-    println!("-> Solved metavariable hole and unified polymorphic closure in {:?}", elapsed);
+    println!(
+        "-> Solved metavariable hole and unified polymorphic closure in {:?}",
+        elapsed
+    );
 }
