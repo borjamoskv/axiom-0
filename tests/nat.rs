@@ -1,8 +1,8 @@
 use micro_axiom_0::ast::Ast;
-use micro_axiom_0::eval::Value;
-use micro_axiom_0::parser::Parser;
-use micro_axiom_0::lexer::Lexer;
 use micro_axiom_0::elaborator;
+use micro_axiom_0::eval::Value;
+use micro_axiom_0::lexer::Lexer;
+use micro_axiom_0::parser::Parser;
 
 #[test]
 fn test_nat_induction() {
@@ -18,5 +18,10 @@ fn test_nat_induction() {
     assert_eq!(elab.ty, Value::NatType);
 
     let val = micro_axiom_0::eval::eval(&ast, expr, &[], None);
-    assert_eq!(val, Value::Succ(Box::new(Value::Succ(Box::new(Value::Succ(Box::new(Value::Zero)))))));
+    assert_eq!(
+        val,
+        Value::Succ(Box::new(Value::Succ(Box::new(Value::Succ(Box::new(
+            Value::Zero
+        ))))))
+    );
 }

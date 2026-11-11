@@ -52,7 +52,10 @@ fn test_identity_refl_mismatch_rejected() {
 
     let expected_val = eval(&ast, expected_ty_expr, &[], None);
     let check_res = elaborator::check(&ast, term, expected_val, &[]);
-    assert!(check_res.is_err(), "refl(Z) must be rejected against Id(Nat, Z, S(Z))");
+    assert!(
+        check_res.is_err(),
+        "refl(Z) must be rejected against Id(Nat, Z, S(Z))"
+    );
 }
 
 #[test]
@@ -68,8 +71,8 @@ fn test_identity_j_definitional_computation() {
         parser.parse_expression().unwrap()
     };
 
-    let elab = elaborator::synthesize(&ast, term, &[])
-        .expect("Synthesis for canonical J term failed");
+    let elab =
+        elaborator::synthesize(&ast, term, &[]).expect("Synthesis for canonical J term failed");
     assert_eq!(elab.ty, Value::NatType);
 
     // Definitional reduction rule: J(P, d, refl) = d
@@ -131,5 +134,8 @@ fn test_identity_qtt_proof_erasure() {
     let expected_val = eval(&ast, ty_expr, &[], None);
     let elab = elaborator::check(&ast, term, expected_val, &[])
         .expect("Type check with erased proof parameter failed");
-    assert!(elab.usages.is_empty(), "Erased proof must consume 0 resources at runtime");
+    assert!(
+        elab.usages.is_empty(),
+        "Erased proof must consume 0 resources at runtime"
+    );
 }

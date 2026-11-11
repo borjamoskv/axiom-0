@@ -68,10 +68,7 @@ pub fn run_repl<R: BufRead, W: Write>(mut reader: R, mut writer: W) -> io::Resul
                     match synthesize_in_env(&ast, annotation, &global_env, &global_types) {
                         Ok(elaboration) if matches!(elaboration.ty, Value::Universe(_)) => {}
                         Ok(_) => {
-                            writeln!(
-                                writer,
-                                "Type error in let: annotation must be a type."
-                            )?;
+                            writeln!(writer, "Type error in let: annotation must be a type.")?;
                             continue;
                         }
                         Err(error) => {

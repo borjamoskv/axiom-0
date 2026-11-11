@@ -2,7 +2,7 @@
 
 use micro_axiom_0::ast::Ast;
 use micro_axiom_0::elaborator::check;
-use micro_axiom_0::erasure::{emit_c_code, erase_expression, eval_runtime, RuntimeTerm};
+use micro_axiom_0::erasure::{RuntimeTerm, emit_c_code, erase_expression, eval_runtime};
 use micro_axiom_0::eval::eval;
 use micro_axiom_0::lexer::Lexer;
 use micro_axiom_0::parser::Parser;
@@ -24,7 +24,11 @@ fn test_erasure_peano_unboxing() {
 
     let erased = erase_expression(&ast, term).unwrap();
     assert_eq!(erased, RuntimeTerm::Nat(3));
-    assert_eq!(erased.node_count(), 1, "Unboxed Nat must be a single scalar node");
+    assert_eq!(
+        erased.node_count(),
+        1,
+        "Unboxed Nat must be a single scalar node"
+    );
 }
 
 #[test]
@@ -104,7 +108,11 @@ fn test_erasure_if_conditional_branching() {
 fn test_erasure_peano_recursion_evaluation() {
     let mut ast = Ast::new();
     // ind(fn _ -> Nat, S(Z), fn _ -> fn ih -> S(ih), S(S(Z))) => computes 1 + 2 = 3
-    let term = parse(&mut ast, "ind(fn _ -> Nat, S(Z), fn _ -> fn ih -> S(ih), S(S(Z)))", &[]);
+    let term = parse(
+        &mut ast,
+        "ind(fn _ -> Nat, S(Z), fn _ -> fn ih -> S(ih), S(S(Z)))",
+        &[],
+    );
     let ty = parse(&mut ast, "Nat", &[]);
     let expected = eval(&ast, ty, &[], None);
     assert!(check(&ast, term, expected, &[]).is_ok());
@@ -152,4 +160,3 @@ fn test_erasure_preserves_computational_unit_application() {
     let erased = erase_expression(&ast, term).unwrap();
     assert_eq!(eval_runtime(&erased, &[]), RuntimeTerm::Nat(1));
 }
-
