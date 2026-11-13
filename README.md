@@ -10,12 +10,36 @@
 
 ## ⚡ Quickstart
 
-Validate the default hosted build and launch the interactive REPL:
+Run the complete validation suite from the repository root.
 
 ```sh
-cargo check --workspace -q
-cargo test --workspace -q
-cargo clippy --workspace -- -D warnings
+python3 validate.py
+```
+
+The suite requires Python 3.10 or newer, a stable Rust toolchain with `rustfmt` and `clippy`,
+the `aarch64-unknown-none` target, `qemu-system-aarch64`, and a native C99 compiler
+selected by `CC` or named `cc`. Install the Rust components with these commands.
+
+```sh
+rustup component add rustfmt clippy
+rustup target add aarch64-unknown-none
+```
+
+[validate.py](validate.py) runs the three AGENTS.md controls, hosted formatting,
+all-target checks and stress coverage, host tests and Clippy without default
+features, the bare-metal library build, firmware formatting and Clippy, and
+QEMU runs for one vCPU, two-vCPU snapshot contention and the separate panic
+control. The CI workflow uses the same entrypoint. Every stage is required and
+the first failure stops validation with a nonzero exit status.
+
+An absolute path to `validate.py` works from any current directory.
+`--qemu /absolute/path/qemu-system-aarch64` selects the emulator, and
+`--timeout 30` sets the timeout for each guest run. The default is 30 seconds
+and the value must be finite and positive.
+
+Launch the interactive REPL separately.
+
+```sh
 cargo run --bin micro-axiom-0
 ```
 
@@ -36,10 +60,9 @@ The final bare-metal application supplies its allocator, panic handler and
 device-specific startup/linker configuration. Building the library does not
 verify firmware execution. See [features and progress guarantees](docs/NO_STD.md).
 
-To boot and test an actual `no_std` ELF in QEMU, follow the
-[minimal AArch64 firmware instructions](crates/qemu-firmware/README.md), or run
-`python3 crates/qemu-firmware/run.py --check-panic` after installing QEMU and the
-Rust target.
+The full validation command boots and tests actual `no_std` ELFs in QEMU.
+For individual firmware runs and platform setup, follow the
+[minimal AArch64 firmware instructions](crates/qemu-firmware/README.md).
 
 ---
 

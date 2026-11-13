@@ -555,48 +555,34 @@ fn erase_expr_rec_typed(
 
         Expr::Fst(pair) => {
             let p = erase_expr_rec(ast, pair, level_map, runtime_depth, ty_env, val_env)?;
-            match p {
-                RuntimeTerm::Pair(first, _) => Ok(*first),
-                other => {
-                    let (first_erased, second_erased) = pair_component_erasure(
-                        ast,
-                        pair,
-                        level_map,
-                        runtime_depth,
-                        ty_env,
-                        val_env,
-                    )?;
-                    if first_erased {
-                        Ok(RuntimeTerm::Erased)
-                    } else if second_erased {
-                        Ok(other)
-                    } else {
-                        Ok(RuntimeTerm::Fst(Box::new(normalize_erased_root(other))))
-                    }
+            let (first_erased, second_erased) =
+                pair_component_erasure(ast, pair, level_map, runtime_depth, ty_env, val_env)?;
+            // A retained component can itself be a pair. Consult the source Sigma
+            // layout before projecting, since erasure may have removed this layer.
+            if first_erased {
+                Ok(RuntimeTerm::Erased)
+            } else if second_erased {
+                Ok(p)
+            } else {
+                match p {
+                    RuntimeTerm::Pair(first, _) => Ok(*first),
+                    other => Ok(RuntimeTerm::Fst(Box::new(normalize_erased_root(other)))),
                 }
             }
         }
 
         Expr::Snd(pair) => {
             let p = erase_expr_rec(ast, pair, level_map, runtime_depth, ty_env, val_env)?;
-            match p {
-                RuntimeTerm::Pair(_, second) => Ok(*second),
-                other => {
-                    let (first_erased, second_erased) = pair_component_erasure(
-                        ast,
-                        pair,
-                        level_map,
-                        runtime_depth,
-                        ty_env,
-                        val_env,
-                    )?;
-                    if second_erased {
-                        Ok(RuntimeTerm::Erased)
-                    } else if first_erased {
-                        Ok(other)
-                    } else {
-                        Ok(RuntimeTerm::Snd(Box::new(normalize_erased_root(other))))
-                    }
+            let (first_erased, second_erased) =
+                pair_component_erasure(ast, pair, level_map, runtime_depth, ty_env, val_env)?;
+            if second_erased {
+                Ok(RuntimeTerm::Erased)
+            } else if first_erased {
+                Ok(p)
+            } else {
+                match p {
+                    RuntimeTerm::Pair(_, second) => Ok(*second),
+                    other => Ok(RuntimeTerm::Snd(Box::new(normalize_erased_root(other)))),
                 }
             }
         }

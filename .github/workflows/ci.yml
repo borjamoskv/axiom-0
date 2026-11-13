@@ -14,6 +14,7 @@ jobs:
   audit:
     name: Verification & Falsification Suite
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -22,18 +23,15 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+          targets: aarch64-unknown-none
+
+      - name: Install QEMU and native C compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y qemu-system-arm build-essential python3
 
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
 
-      - name: Enforce Formatting (cargo fmt)
-        run: cargo fmt --all -- --check
-
-      - name: Static Analysis (cargo clippy)
-        run: cargo clippy --all-targets -- -D warnings
-
-      - name: Run Test Suite (cargo test)
-        run: cargo test --all-targets
-
-      - name: Run Stress Tests (10k Popperian)
-        run: cargo run --release --example stress_popperian_10k
+      - name: Validate core and firmware
+        run: python3 validate.py

@@ -13,6 +13,7 @@ micro-axiom-0 = { path = "../..", default-features = false }
 
 [features]
 panic-test = []
+smp-test = []
 
 [[bin]]
 name = "axiom0-qemu-firmware"
