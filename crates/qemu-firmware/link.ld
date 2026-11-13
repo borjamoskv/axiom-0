@@ -22,9 +22,11 @@ SECTIONS {
         __stack_bottom = .;
         . += 1M;
         __stack_top = .;
+        KEEP(*(.stack.secondary))
+        __stacks_end = .;
     } > RAM
     /DISCARD/ : { *(.eh_frame .eh_frame_hdr) *(.comment) }
 }
 
 ASSERT((__stack_top & 15) == 0, "AAPCS64 requires 16-byte stack alignment")
-ASSERT(__stack_top <= ORIGIN(RAM) + LENGTH(RAM), "firmware exceeds guest RAM")
+ASSERT(__stacks_end <= ORIGIN(RAM) + LENGTH(RAM), "firmware exceeds guest RAM")

@@ -7,6 +7,62 @@ use crate::eval::{Value, eval};
 #[cfg(feature = "std")]
 use crate::turbine::TurbineEngine;
 
+fn assert_closed_erasure(source: &str, expected_value: Value, expected_runtime: RuntimeTerm) {
+    let tokens = crate::lexer::Lexer::new(source).tokenize_all().unwrap();
+    let mut ast = Ast::new();
+    let root = crate::parser::Parser::new(&tokens, &mut ast, &[])
+        .parse_expression()
+        .unwrap();
+    synthesize(&ast, root, &[]).unwrap();
+    assert_eq!(eval(&ast, root, &[], None), expected_value, "{source}");
+    let erased = erase_expression(&ast, root).unwrap();
+    assert_eq!(eval_runtime(&erased, &[]), expected_runtime, "{source}");
+}
+
+#[test]
+fn nested_sigma_projection_preserves_pair_after_zero_quantity_erasure() {
+    let pair = "((Z, (S(Z), S(S(Z)))) : sigma :^0 (x : Nat) * (sigma (y : Nat) * Nat))";
+    let one = Value::Succ(Box::new(Value::Zero));
+    let two = Value::Succ(Box::new(one.clone()));
+    assert_closed_erasure(
+        &alloc::format!("{pair}.2"),
+        Value::Pair(Box::new(one.clone()), Box::new(two)),
+        RuntimeTerm::Pair(Box::new(RuntimeTerm::Nat(1)), Box::new(RuntimeTerm::Nat(2))),
+    );
+    assert_closed_erasure(&alloc::format!("{pair}.2.1"), one, RuntimeTerm::Nat(1));
+}
+
+#[test]
+fn nested_sigma_projection_preserves_pair_after_proof_erasure() {
+    let pair = "(((S(Z), S(S(Z))), refl(Z)) : sigma (x : sigma (y : Nat) * Nat) * Id(Nat, Z, Z))";
+    let one = Value::Succ(Box::new(Value::Zero));
+    let two = Value::Succ(Box::new(one.clone()));
+    assert_closed_erasure(
+        &alloc::format!("{pair}.1"),
+        Value::Pair(Box::new(one), Box::new(two.clone())),
+        RuntimeTerm::Pair(Box::new(RuntimeTerm::Nat(1)), Box::new(RuntimeTerm::Nat(2))),
+    );
+    assert_closed_erasure(&alloc::format!("{pair}.1.2"), two, RuntimeTerm::Nat(2));
+}
+
+#[test]
+fn nested_sigma_projection_retains_both_computational_components() {
+    let first = "(((S(Z), S(S(Z))), Z) : sigma (x : sigma (y : Nat) * Nat) * Nat)";
+    let second = "((Z, (S(Z), S(S(Z)))) : sigma (x : Nat) * (sigma (y : Nat) * Nat))";
+    for source in [alloc::format!("{first}.1"), alloc::format!("{second}.2")] {
+        let one = Value::Succ(Box::new(Value::Zero));
+        let two = Value::Succ(Box::new(one.clone()));
+        assert_closed_erasure(
+            &source,
+            Value::Pair(Box::new(one), Box::new(two)),
+            RuntimeTerm::Pair(Box::new(RuntimeTerm::Nat(1)), Box::new(RuntimeTerm::Nat(2))),
+        );
+    }
+    for source in [alloc::format!("{first}.2"), alloc::format!("{second}.1")] {
+        assert_closed_erasure(&source, Value::Zero, RuntimeTerm::Nat(0));
+    }
+}
+
 #[test]
 #[cfg(feature = "std")]
 fn reg_p1_1_unifier_rejects_cyclic_occurs_check() {

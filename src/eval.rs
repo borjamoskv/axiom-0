@@ -249,23 +249,15 @@ pub fn equiv(ast: &Ast, a: &Value, b: &Value, depth: usize) -> bool {
                 equiv(ast, &v1, &v2, depth + 1)
             }
         }
-        (Value::Lam(_p, _q, c), Value::Neutral(n)) => {
+        (Value::Lam(p, _q, c), Value::Neutral(n)) => {
             let var = Value::Neutral(Neutral::Var(Level(depth)));
             let v1 = c.clone().instantiate(ast, var.clone(), None);
-            let v2 = Value::Neutral(Neutral::App(
-                crate::ast::Plicity::Explicit,
-                Box::new(n.clone()),
-                Box::new(var),
-            ));
+            let v2 = Value::Neutral(Neutral::App(*p, Box::new(n.clone()), Box::new(var)));
             equiv(ast, &v1, &v2, depth + 1)
         }
-        (Value::Neutral(n), Value::Lam(_p, _q, c)) => {
+        (Value::Neutral(n), Value::Lam(p, _q, c)) => {
             let var = Value::Neutral(Neutral::Var(Level(depth)));
-            let v1 = Value::Neutral(Neutral::App(
-                crate::ast::Plicity::Explicit,
-                Box::new(n.clone()),
-                Box::new(var.clone()),
-            ));
+            let v1 = Value::Neutral(Neutral::App(*p, Box::new(n.clone()), Box::new(var.clone())));
             let v2 = c.clone().instantiate(ast, var, None);
             equiv(ast, &v1, &v2, depth + 1)
         }

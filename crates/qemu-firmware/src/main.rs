@@ -17,10 +17,12 @@ use micro_axiom_0::turbine::{AtomicElabSnapshot, ElabStatus, TurbineEngine};
 
 mod allocator;
 mod platform;
+#[cfg(feature = "smp-test")]
+mod smp;
 
 // SAFETY: this assembly owns the ELF entry point and calls Rust only after
 // establishing an aligned stack, zeroed BSS, enabled SIMD and masked interrupts.
-core::arch::global_asm!(include_str!("boot.S"));
+core::arch::global_asm!(include_str!("boot.S"), smp = const cfg!(feature = "smp-test") as u8);
 
 #[global_allocator]
 static HEAP: allocator::BumpAllocator = allocator::BumpAllocator::new();
@@ -85,7 +87,22 @@ fn polymorphism_check() -> Check {
     require(
         erasure::eval_runtime(&erased, &[]) == RuntimeTerm::Nat(1),
         "runtime reindexing",
-    )
+    )?;
+    for source in [
+        "(fn {x} -> x) : fn (x : Bool) -> Bool",
+        "(fn x -> x) : fn {x : Bool} -> Bool",
+        "((fn x -> x) : fn (x : Bool) -> Bool) {True}",
+    ] {
+        let (ast, root) = parse(source)?;
+        require(
+            matches!(
+                elaborator::synthesize(&ast, root, &[]),
+                Err(Error::PlicityMismatch { .. })
+            ),
+            "expected binder or application plicity mismatch",
+        )?;
+    }
+    Ok(())
 }
 
 fn linearity_check() -> Check {
@@ -136,7 +153,21 @@ fn recursion_check() -> Check {
     require(
         c.contains("__axiom0_natrec_0"),
         "recursion silently replaced by a scalar",
-    )
+    )?;
+    for source in [
+        "ind(fn {n} -> Nat, Z, fn :^0 n -> fn :^1 ih -> S(ih), S(Z))",
+        "ind(fn n -> Nat, Z, fn :^0 {n} -> fn :^1 ih -> S(ih), S(Z))",
+    ] {
+        let (ast, root) = parse(source)?;
+        require(
+            matches!(
+                elaborator::synthesize(&ast, root, &[]),
+                Err(Error::PlicityMismatch { .. })
+            ),
+            "implicit induction motive or step parameter was accepted",
+        )?;
+    }
+    Ok(())
 }
 
 fn identity_proof_check() -> Check {
@@ -146,7 +177,19 @@ fn identity_proof_check() -> Check {
     require(
         term == RuntimeTerm::Nat(2),
         "identity elimination retained runtime proof",
-    )
+    )?;
+    for source in [
+        "J(Bool, True, refl(Z))",
+        "J(fn b -> Bool, True, refl(Z))",
+        "J((fn b -> fn p -> Bool) : fn (b : Bool) -> fn (p : Bool) -> type, True, refl(Z))",
+    ] {
+        let (ast, root) = parse(source)?;
+        require(
+            elaborator::synthesize(&ast, root, &[]).is_err(),
+            "invalid identity elimination motive was accepted",
+        )?;
+    }
+    Ok(())
 }
 
 fn snapshot_check() -> Check {
@@ -222,6 +265,19 @@ pub extern "C" fn firmware_main() -> ! {
             }
         }
     }
+    #[cfg(feature = "smp-test")]
+    match smp::check() {
+        Ok(()) => {
+            let _ = writeln!(platform::Console, "[OK] SMP snapshot contention");
+        }
+        Err(reason) => {
+            let _ = writeln!(
+                platform::Console,
+                "[FAIL] SMP snapshot contention: {reason}"
+            );
+            platform::exit(1);
+        }
+    }
     let _ = writeln!(
         platform::Console,
         "Heap used: {} / {} bytes (bump, no reclamation)",
@@ -232,7 +288,8 @@ pub extern "C" fn firmware_main() -> ! {
     panic!("intentional panic self-test");
     #[cfg(not(feature = "panic-test"))]
     {
-        let _ = writeln!(platform::Console, "FIRMWARE PASS: 8 checks");
+        let count = 8 + usize::from(cfg!(feature = "smp-test"));
+        let _ = writeln!(platform::Console, "FIRMWARE PASS: {count} checks");
         platform::exit(0)
     }
 }

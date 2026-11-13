@@ -48,9 +48,11 @@ platform policies. ASTs, parser buffers, semantic closures, erasure and generate
 C strings allocate; disabling `std` does not make those paths heap-free.
 
 A separate [QEMU firmware smoke test](../crates/qemu-firmware/README.md) supplies
-those platform policies and executes the real library as an AArch64 ELF. From
-the repository root, run `python3 crates/qemu-firmware/run.py --check-panic` to
-check the normal exit and the panic handler in QEMU TCG.
+those platform policies and executes the real library as an AArch64 ELF.
+`python3 validate.py` from the repository root includes the bare-metal release
+library build and firmware checks, followed by single-vCPU, SMP and separate
+intentional-panic runs in QEMU TCG. All stages are required. The firmware's
+standalone workspace remains separate, and the validator invokes it explicitly.
 
 Hosted tests can execute against the `no_std` library using the host test
 harness and allocator. Tests/examples that require hosted inference or batches
@@ -89,7 +91,16 @@ cross-compiling strengthens the memory model or constitutes a formal proof of
 progress. See [the snapshot protocol](snapshot-protocol.md) for coherence and
 finite-model coverage.
 
-## Default validation contract
+## Unified validation contract
+
+Use [validate.py](../validate.py) for the complete core and firmware suite.
+
+```sh
+python3 validate.py
+```
+
+The suite includes host tests and Clippy with default features disabled, while
+retaining these exact AGENTS.md controls for the default hosted configuration.
 
 ```sh
 cargo check --workspace -q
@@ -97,6 +108,9 @@ cargo test --workspace -q
 cargo clippy --workspace -- -D warnings
 ```
 
-Keep these default hosted checks in addition to the bare-metal build and the
-allocation-only host tests; they cover the V1 occurs-check, concurrency and
-native C99 regressions that depend on hosted facilities.
+Those hosted controls cover the V1 occurs-check, concurrency and native C99
+regressions. The unified suite also retains formatting, all-target and stress
+coverage, checks firmware with default and all features, and validates actual
+QEMU transcripts and exit statuses. It stops at the first failure and offers no
+option to skip a required stage. See the [quickstart](../README.md)
+for prerequisites and the `--qemu` and `--timeout` options.
